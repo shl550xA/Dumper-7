@@ -1,6 +1,12 @@
 #include "Settings.h"
 
+#include "Platform.h"
+
+#if defined(PLATFORM_WINDOWS)
 #include <Windows.h>
+#endif
+
+#include <algorithm>
 #include <filesystem>
 #include <string>
 
@@ -127,9 +133,14 @@ void Settings::Config::Load()
 	if (!ConfigPath) 
 		return;
 
+#if defined(PLATFORM_WINDOWS)
 	char SDKNamespace[256] = {};
 	GetPrivateProfileStringA("Settings", "SDKNamespaceName", "SDK", SDKNamespace, sizeof(SDKNamespace), ConfigPath);
 
 	SDKNamespaceName = SDKNamespace;
-	SleepTimeout = max(GetPrivateProfileIntA("Settings", "SleepTimeout", 0, ConfigPath), 0);
+	SleepTimeout = std::max(GetPrivateProfileIntA("Settings", "SleepTimeout", 0, ConfigPath), 0);
+#else
+	/* INI parsing is not available on this platform - leave defaults in place. */
+	(void)ConfigPath;
+#endif
 }

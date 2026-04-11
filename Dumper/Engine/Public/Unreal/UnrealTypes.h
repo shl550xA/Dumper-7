@@ -3,7 +3,11 @@
 #include <array>
 #include <string>
 #include <iostream>
+
+#include "Platform.h"
+#if defined(PLATFORM_WINDOWS)
 #include <Windows.h>
+#endif
 
 #include "Unreal/Enums.h"
 #include "OffsetFinder/Offsets.h"
@@ -81,6 +85,8 @@ private:
 	inline static void(*AppendString)(const void*, FString&) = nullptr;
 #elif defined(_WIN32)
 	inline static void(__thiscall* AppendString)(const void*, FString&) = nullptr;
+#else
+	inline static void(*AppendString)(const void*, FString&) = nullptr;
 #endif
 
 	// Fallback when AppendString was inlined as a combination of 'FNameEntry* FName::GetNameEntry()' and 'void FNameEntry::GetPlainNameString(FString& OutStr)'.
@@ -98,6 +104,7 @@ public:
 
 public:
 	static void Init_Windows(bool bForceGNames = false);
+	static void Init_Android(bool bForceGNames = false);
 	static void InitFallback();
 
 	static void Init(int32 OverrideOffset, EOffsetOverrideType OverrideType = EOffsetOverrideType::AppendString, bool bIsNamePool = false, const char* const ModuleName = Settings::General::DefaultModuleName);

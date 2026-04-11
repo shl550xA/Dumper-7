@@ -12,6 +12,8 @@
 #include "Architecture.h"
 
 
+void Off::InSDK::ProcessEvent::InitPE_Android() {}
+
 void Off::InSDK::ProcessEvent::InitPE_Windows()
 {
 #ifdef PLATFORM_WINDOWS

@@ -1,3 +1,6 @@
+#include "Platform.h"
+
+#if defined(PLATFORM_WINDOWS)
 #include <Windows.h>
 #include <iostream>
 #include <chrono>
@@ -100,3 +103,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
 
 	return TRUE;
 }
+
+#else // PLATFORM_WINDOWS
+
+/*
+ * Android stub entry point. The dumper currently only has a real implementation on
+ * Windows; on android-arm64 we still build the shared library so downstream build
+ * targets link, but it does nothing. See Platform.h for the platform dispatch.
+ */
+extern "C" void Dumper7_AndroidStub() {}
+
+#endif // PLATFORM_WINDOWS
+

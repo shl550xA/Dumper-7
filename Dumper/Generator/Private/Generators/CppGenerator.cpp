@@ -3504,12 +3504,12 @@ namespace Offsets
 	constexpr int32 ProcessEvent      = 0x{:08X};
 	constexpr int32 ProcessEventIdx   = 0x{:08X};
 }}
-)", max(Off::InSDK::ObjArray::GObjects, 0x0),
-	max(Off::InSDK::Name::AppendNameToString, 0x0),
+)", std::max(Off::InSDK::ObjArray::GObjects, 0x0),
+	std::max(Off::InSDK::Name::AppendNameToString, 0x0),
 	GetNameEntryFromNameOffsetText,
-	max(Off::InSDK::NameArray::GNames, 0x0),
-	max(Off::InSDK::World::GWorld, 0x0),
-	max(Off::InSDK::ProcessEvent::PEOffset, 0x0),
+	std::max(Off::InSDK::NameArray::GNames, 0x0),
+	std::max(Off::InSDK::World::GWorld, 0x0),
+	std::max(Off::InSDK::ProcessEvent::PEOffset, 0x0),
 	Off::InSDK::ProcessEvent::PEIndex);
 
 

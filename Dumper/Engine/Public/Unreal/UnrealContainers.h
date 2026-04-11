@@ -341,7 +341,12 @@ namespace UC
 		{
 			if (*this)
 			{
+#if defined(_WIN32) || defined(_WIN64)
 				return UtfN::Utf16StringToUtf8String<std::string>(Data, NumElements  - 1); // Exclude null-terminator
+#else
+				/* Non-Windows wchar_t is 32-bit; reinterpret the buffer as 16-bit UE2 FString data. */
+				return UtfN::Utf16StringToUtf8String<std::string>(reinterpret_cast<const char16_t*>(Data), NumElements - 1);
+#endif
 			}
 
 			return "";

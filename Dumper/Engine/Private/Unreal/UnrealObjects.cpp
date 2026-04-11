@@ -466,6 +466,8 @@ void UEObject::ProcessEvent(UEFunction Func, void* Params)
 	void(*Prd)(void*, void*, void*) = decltype(Prd)(VFT[Off::InSDK::ProcessEvent::PEIndex]);
 #elif defined(_WIN32)
 	void(__thiscall* Prd)(void*, void*, void*) = decltype(Prd)(VFT[Off::InSDK::ProcessEvent::PEIndex]);
+#else
+	void(*Prd)(void*, void*, void*) = decltype(Prd)(VFT[Off::InSDK::ProcessEvent::PEIndex]);
 #endif
 
 	Prd(Object, Func.GetAddress(), Params);

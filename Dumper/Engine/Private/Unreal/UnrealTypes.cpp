@@ -40,7 +40,12 @@ std::string MakeNameValid(std::wstring&& Name)
 	std::u32string Strrr;
 	Strrr += UtfN::utf_cp32_t{ 200 };
 
+#if defined(_WIN32) || defined(_WIN64)
 	std::u32string Utf32Name = UtfN::Utf16StringToUtf32String<std::u32string>(Name);
+#else
+	/* Non-Windows: wchar_t is already 32-bit, reinterpret to u32string. */
+	std::u32string Utf32Name(reinterpret_cast<const char32_t*>(Name.data()), Name.size());
+#endif
 
 	bool bIsFirstIteration = true;
 	for (auto It = UtfN::utf32_iterator<std::u32string::iterator>(Utf32Name); It; ++It)
@@ -65,6 +70,8 @@ FName::FName(const void* Ptr)
 	: Address(static_cast<const uint8*>(Ptr))
 {
 }
+
+void FName::Init_Android(bool /*bForceGNames*/) {}
 
 void FName::Init_Windows(bool bForceGNames)
 {

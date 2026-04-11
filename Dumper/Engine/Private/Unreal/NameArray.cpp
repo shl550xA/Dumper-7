@@ -361,6 +361,9 @@ inline std::pair<uintptr_t, bool> FindFNameGetNamesOrGNames_Windows(const uintpt
 #endif // PLATFORM_WINDOWS
 };
 
+bool NameArray::TryFindNameArray_Android() { return false; }
+bool NameArray::TryFindNamePool_Android() { return false; }
+
 bool NameArray::TryFindNameArray_Windows()
 {
 #ifdef PLATFORM_WINDOWS

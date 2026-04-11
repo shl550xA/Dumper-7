@@ -53,6 +53,49 @@
                 "CMAKE_C_COMPILER": "cl.exe",
                 "CMAKE_CXX_COMPILER": "cl.exe"
             }
+        },
+        {
+            "name": "android-arm64",
+            "hidden": true,
+            "generator": "Ninja",
+            "installDir": "${sourceDir}/build/${presetName}/install",
+            "toolchainFile": "$env{ANDROID_NDK_ROOT}/$env{ANDROID_NDK_VERSION}/build/cmake/android.toolchain.cmake",
+            "cacheVariables": {
+                "CMAKE_MAKE_PROGRAM": "$env{ANDROID_SDK_ROOT}/cmake/$env{ANDROID_CMAKE_VERSION}/bin/ninja",
+                "ANDROID_ABI": "arm64-v8a",
+                "ANDROID_NATIVE_API_LEVEL": "28",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": true
+            },
+            "warnings": {
+                "dev": false
+            }
+        },
+        {
+            "name": "android-arm64-debug",
+            "displayName": "Android ARM64 Debug",
+            "inherits": "android-arm64",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "android-arm64-release",
+            "displayName": "Android ARM64 Release",
+            "inherits": "android-arm64",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
+            "name": "android-arm64-prod",
+            "displayName": "Android ARM64 Prod",
+            "inherits": "android-arm64",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
         }
     ],
     "buildPresets": [

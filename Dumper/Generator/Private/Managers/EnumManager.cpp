@@ -1,5 +1,9 @@
 #include "Managers/EnumManager.h"
 
+#include <algorithm>
+
+using std::max;
+
 namespace EnumInitHelper
 {
 	template<typename T>
@@ -14,13 +18,13 @@ namespace EnumInitHelper
 			Size = 0x8;
 		}
 		else if (EnumValue > GetMaxOfType<uint16>()) {
-			Size = max(Size, 0x4);
+			Size = static_cast<uint8>(max<int>(Size, 0x4));
 		}
 		else if (EnumValue > GetMaxOfType<uint8>()) {
-			Size = max(Size, 0x2);
+			Size = static_cast<uint8>(max<int>(Size, 0x2));
 		}
 		else {
-			Size = max(Size, 0x1);
+			Size = static_cast<uint8>(max<int>(Size, 0x1));
 		}
 	}
 }
@@ -149,7 +153,7 @@ void EnumManager::InitInternal()
 				std::wstring NameWitPrefix = Name.ToWString();
 
 				if (!NameWitPrefix.ends_with(L"_MAX"))
-					EnumMaxValue = max(EnumMaxValue, Value);
+					EnumMaxValue = max(EnumMaxValue, static_cast<decltype(EnumMaxValue)>(Value));
 
 				auto [NameIndex, bWasInserted] = UniqueEnumValueNames.FindOrAdd(MakeNameValid(NameWitPrefix.substr(NameWitPrefix.find_last_of(L"::") + 1)));
 

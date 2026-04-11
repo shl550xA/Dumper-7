@@ -1,6 +1,8 @@
 #include "Unreal/ObjectArray.h"
 #include "Managers/StructManager.h"
 
+#include <algorithm>
+
 StructInfoHandle::StructInfoHandle(const StructInfo& InInfo)
 	: Info(&InInfo)
 {
@@ -119,7 +121,7 @@ void StructManager::InitAlignmentsAndNames()
 		else
 		{
 			NewOrExistingInfo.bUseExplicitAlignment = MinAlignment > HighestMemberAlignment;
-			NewOrExistingInfo.Alignment = max(MinAlignment, HighestMemberAlignment);
+			NewOrExistingInfo.Alignment = std::max(MinAlignment, HighestMemberAlignment);
 		}
 	}
 

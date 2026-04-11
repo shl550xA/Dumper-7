@@ -47,9 +47,11 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     # Enable colored diagnostics
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fcolor-diagnostics")
     
-    # Enable intrinsics for xorstr (AVX/SSE support)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2 -msse4.2")
-    
+    # Enable intrinsics for xorstr (AVX/SSE support) - x86 only
+    if(NOT ANDROID AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)"))
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2 -msse4.2")
+    endif()
+
     # Silence compile erros Unreal Engine SDK
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-class-conversion -Wno-microsoft-template-shadow -Wno-pragma-once-outside-header")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-mismatched-tags -Wno-invalid-constexpr -Wno-unused-private-field")
@@ -130,8 +132,10 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     # Debug info for debug build
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0")
     
-    # Enable intrinsics for xorstr
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2 -msse4.2")
+    # Enable intrinsics for xorstr - x86 only
+    if(NOT ANDROID AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)"))
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2 -msse4.2")
+    endif()
 endif()
 
 # Print compiler flags

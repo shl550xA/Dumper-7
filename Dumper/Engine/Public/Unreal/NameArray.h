@@ -54,6 +54,10 @@ public:
 	static bool TryFindNameArray_Windows();
 	static bool TryFindNamePool_Windows();
 
+	/* Android stubs - see PlatformAndroid.h */
+	static bool TryFindNameArray_Android();
+	static bool TryFindNamePool_Android();
+
 	static bool TryInit(bool bIsTestOnly = false);
 	static bool TryInit(int32 OffsetOverride, bool bIsNamePool, const char* const ModuleName = Settings::General::DefaultModuleName);
 

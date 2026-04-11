@@ -15,12 +15,22 @@ project(Dumper-7 LANGUAGES CXX C)
 include(${CMAKE_SOURCE_DIR}/cmake/common.cmake)
 
 # Source files - automatic search for all source files
-file(GLOB_RECURSE CPP_SOURCES 
+file(GLOB_RECURSE CPP_SOURCES
     "Dumper/*.cpp"
     "Dumper/*.cxx"
     "Dumper/*.cc"
     "Dumper/*.c"
 )
+
+# Per-platform source filtering. Windows owns PlatformWindows.cpp + Arch_x86.cpp;
+# Android uses the stub PlatformAndroid.cpp + Arch_arm64.cpp.
+if(ANDROID)
+    list(FILTER CPP_SOURCES EXCLUDE REGEX ".*/Platform/Private/PlatformWindows\\.cpp$")
+    list(FILTER CPP_SOURCES EXCLUDE REGEX ".*/Platform/Private/Arch_x86\\.cpp$")
+else()
+    list(FILTER CPP_SOURCES EXCLUDE REGEX ".*/Platform/Private/PlatformAndroid\\.cpp$")
+    list(FILTER CPP_SOURCES EXCLUDE REGEX ".*/Platform/Private/Arch_arm64\\.cpp$")
+endif()
 
 add_library(${PROJECT_NAME} SHARED ${CPP_SOURCES})
 
@@ -74,12 +84,17 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     $<$<CONFIG:Debug>:_DEBUG>
     $<$<CONFIG:Release>:NDEBUG>
-    _CONSOLE
-    WIN32
 )
 
-# Set Windows subsystem
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    WINDOWS_EXPORT_ALL_SYMBOLS ON
-    VS_GLOBAL_KEYWORD "Win32Proj"
-) 
+if(WIN32)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        _CONSOLE
+        WIN32
+    )
+
+    # Set Windows subsystem
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        WINDOWS_EXPORT_ALL_SYMBOLS ON
+        VS_GLOBAL_KEYWORD "Win32Proj"
+    )
+endif()

@@ -1,6 +1,11 @@
 #pragma once
 
+#include "Platform.h"
+
+#if defined(PLATFORM_WINDOWS)
 #include <Windows.h>
+#endif
+
 #include <iostream>
 #include <vector>
 #include <string>
@@ -9,15 +14,19 @@
 
 #include "TmpUtils.h"
 
-#include "Platform.h"
-
 
 inline std::pair<uintptr_t, uintptr_t> GetImageBaseAndSize(const char* const ModuleName = Settings::General::DefaultModuleName)
 {
+#if defined(PLATFORM_WINDOWS)
 	const uintptr_t ImageBase = Platform::GetModuleBase(ModuleName);
 	const PIMAGE_NT_HEADERS NtHeader = reinterpret_cast<PIMAGE_NT_HEADERS>(ImageBase + reinterpret_cast<PIMAGE_DOS_HEADER>(ImageBase)->e_lfanew);
 
 	return { ImageBase, NtHeader->OptionalHeader.SizeOfImage };
+#else
+	/* PE-header walking is Windows-only; stub for other platforms. */
+	(void)ModuleName;
+	return { 0u, 0u };
+#endif
 }
 
 
@@ -27,7 +36,7 @@ inline void* FindUnrealExecFunctionByString(Type RefStr, void* StartAddress = nu
 	const auto [ImageBase, ImageSize] = GetImageBaseAndSize();
 
 	uint8_t* SearchStart = StartAddress ? reinterpret_cast<uint8_t*>(StartAddress) : reinterpret_cast<uint8_t*>(ImageBase);
-	DWORD SearchRange = ImageSize;
+	uint32_t SearchRange = static_cast<uint32_t>(ImageSize);
 
 	const int32_t RefStrLen = StrlenHelper(RefStr);
 

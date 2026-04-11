@@ -18,10 +18,20 @@ namespace Platform = PlatformWindows;
 #endif
 
 #elif defined (__ANDROID__)
-#error "The dumper does not support android."
+
+#include "Platform/Private/PlatformAndroid.h"
+
+namespace Platform = PlatformAndroid;
+
+#define PLATFORM_ANDROID
+#define PLATFORM_ANDROID64
+
+// Dispatches to an _Android-suffixed overload. All such functions are currently
+// stubs that do nothing; see NameArray.cpp, UnrealTypes.cpp, Offsets.cpp etc.
+#define CALL_PLATFORM_SPECIFIC_FUNCTION(FunctionName, ...) FunctionName##_Android(__VA_ARGS__)
+
 #elif defined (__linux__)
 #error "The dumper does not support linux."
 #else
 #error "Unknown and unsupported platform."
 #endif // _WIN32 || _WIN64
-
