@@ -14,6 +14,21 @@ project(Dumper-7 LANGUAGES CXX C)
 
 include(${CMAKE_SOURCE_DIR}/cmake/common.cmake)
 
+function(update_compilation_db)
+    if(NOT CMAKE_EXPORT_COMPILE_COMMANDS)
+        message(FATAL_ERROR "CMAKE_EXPORT_COMPILE_COMMANDS is not enabled")
+    endif()
+
+    set(source "${CMAKE_BINARY_DIR}/compile_commands.json")
+    set(target "${CMAKE_SOURCE_DIR}/build/compile_commands.json")
+
+    file(CREATE_LINK "${source}" "${target}" SYMBOLIC)
+endfunction()
+
+if(ANDROID)
+    update_compilation_db()
+endif()
+
 # Source files - automatic search for all source files
 file(GLOB_RECURSE CPP_SOURCES
     "Dumper/*.cpp"
