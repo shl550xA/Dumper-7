@@ -11,8 +11,8 @@ namespace Settings
 		/* This option determines whether calls to FindByStringInAllSections should only search executable sections, or all sections. */
 		constexpr bool bSearchOnlyExecutableSectionsForStrings = true;
 
-		/* If the target module is not the main executable, specify it here (e.g. "Some-dll-name.dll") */
-		constexpr const char* DefaultModuleName = nullptr;
+		/* If the target module is not the main executable, specify it here (e.g. "Some-dll-name.dll" or "libUE4.so") */
+		inline const char* DefaultModuleName = nullptr;
 	}
   
 	inline constexpr const char* GlobalConfigPath = "C:/Dumper-7/Dumper-7.ini";

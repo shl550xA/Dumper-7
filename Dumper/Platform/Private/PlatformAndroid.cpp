@@ -118,6 +118,26 @@ namespace
 			Module.End = std::max<uintptr_t>(Module.End, Seg.Start + Seg.Size);
 		}
 
+		// Merge adjacent segments with identical permissions. ELF loaders
+		// often split .data and .bss into separate PT_LOAD entries with the
+		// same RW flags; merging them gives callers a single contiguous
+		// region to scan (matching the PE .data section semantics).
+		for (size_t i = 1; i < Module.Segments.size(); )
+		{
+			auto& Prev = Module.Segments[i - 1];
+			const auto& Curr = Module.Segments[i];
+
+			if (Prev.Flags == Curr.Flags && (Prev.Start + Prev.Size) == Curr.Start)
+			{
+				Prev.Size += Curr.Size;
+				Module.Segments.erase(Module.Segments.begin() + i);
+			}
+			else
+			{
+				++i;
+			}
+		}
+
 		if (!Module.Segments.empty())
 			Out->push_back(std::move(Module));
 

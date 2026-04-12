@@ -56,6 +56,14 @@ constexpr inline std::array FChunkedFixedUObjectArrayLayouts =
 		.NumElementsOffset = 0x14,
 		.MaxChunksOffset = 0x10,
 		.NumChunksOffset = 0x04,
+	},
+	FChunkedFixedUObjectArrayLayout // DFM
+	{
+		.ObjectsOffset = 0x10,
+		.MaxElementsOffset = 0x28,
+		.NumElementsOffset = 0x4,
+		.MaxChunksOffset = 0x0, // first
+		.NumChunksOffset = 0x8,
 	}
 };
 
