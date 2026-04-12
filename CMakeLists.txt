@@ -113,3 +113,10 @@ if(WIN32)
         VS_GLOBAL_KEYWORD "Win32Proj"
     )
 endif()
+
+if(ANDROID)
+    # dl: dl_iterate_phdr, dlopen, dlsym (module walking)
+    # log: future __android_log_print use; harmless to link now
+    target_link_libraries(${PROJECT_NAME} PRIVATE dl log)
+endif()
+

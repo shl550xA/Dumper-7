@@ -41,7 +41,7 @@ public:
 		if (NumElementsToReserve > 0x1000000)
 			return;
 
-		this->Data = static_cast<wchar_t*>(malloc(sizeof(wchar_t) * NumElementsToReserve));
+		this->Data = static_cast<TCHAR*>(malloc(sizeof(TCHAR) * NumElementsToReserve));
 		this->NumElements = 0;
 		this->MaxElements = NumElementsToReserve;
 	}

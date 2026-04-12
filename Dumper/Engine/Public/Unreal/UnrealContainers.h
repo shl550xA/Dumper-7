@@ -312,7 +312,7 @@ namespace UC
 		template<typename T> friend Iterators::TArrayIterator<T> end  (const TArray& Array);
 	};
 
-	class FString : public TArray<wchar_t>
+	class FString : public TArray<TCHAR>
 	{
 	public:
 		friend std::ostream& operator<<(std::ostream& Stream, const UC::FString& Str) { return Stream << Str.ToString(); }
@@ -320,16 +320,16 @@ namespace UC
 	public:
 		using TArray::TArray;
 
-		FString(const wchar_t* Str)
+		FString(const TCHAR* Str)
 		{
-			const uint32 NullTerminatedLength = static_cast<uint32>(wcslen(Str) + 0x1);
+			const uint32 NullTerminatedLength = static_cast<uint32>(TCHARLen(Str) + 0x1);
 
-			Data = const_cast<wchar_t*>(Str);
+			Data = const_cast<TCHAR*>(Str);
 			NumElements = NullTerminatedLength;
 			MaxElements = NullTerminatedLength;
 		}
 
-		FString(wchar_t* Str, int32 Num, int32 Max)
+		FString(TCHAR* Str, int32 Num, int32 Max)
 		{
 			Data = Str;
 			NumElements = Num;
@@ -341,12 +341,7 @@ namespace UC
 		{
 			if (*this)
 			{
-#if defined(_WIN32) || defined(_WIN64)
-				return UtfN::Utf16StringToUtf8String<std::string>(Data, NumElements  - 1); // Exclude null-terminator
-#else
-				/* Non-Windows wchar_t is 32-bit; reinterpret the buffer as 16-bit UE2 FString data. */
 				return UtfN::Utf16StringToUtf8String<std::string>(reinterpret_cast<const char16_t*>(Data), NumElements - 1);
-#endif
 			}
 
 			return "";
@@ -355,18 +350,18 @@ namespace UC
 		inline std::wstring ToWString() const
 		{
 			if (*this)
-				return std::wstring(Data);
+				return TCHARToWString(Data);
 
 			return L"";
 		}
 
 	public:
-		inline       wchar_t* CStr()       { return Data; }
-		inline const wchar_t* CStr() const { return Data; }
+		inline       TCHAR* CStr()       { return Data; }
+		inline const TCHAR* CStr() const { return Data; }
 
 	public:
-		inline bool operator==(const FString& Other) const { return Other ? NumElements == Other.NumElements && wcscmp(Data, Other.Data) == 0 : false; }
-		inline bool operator!=(const FString& Other) const { return Other ? NumElements != Other.NumElements || wcscmp(Data, Other.Data) != 0 : true; }
+		inline bool operator==(const FString& Other) const { return Other ? NumElements == Other.NumElements && TCHARCmp(Data, Other.Data) == 0 : false; }
+		inline bool operator!=(const FString& Other) const { return Other ? NumElements != Other.NumElements || TCHARCmp(Data, Other.Data) != 0 : true; }
 	};
 
 	// Utf8String that assumes C-APIs (strlen, strcmp) behaviour works for char8_t like Ansi strings, execept it's counting/comparing bytes not characters.
@@ -529,7 +524,7 @@ namespace UC
 	public:
 		FAllocatedString(int32 Size)
 		{
-			Data = static_cast<wchar_t*>(malloc(Size * sizeof(wchar_t)));
+			Data = static_cast<TCHAR*>(malloc(Size * sizeof(TCHAR)));
 			NumElements = 0x0;
 			MaxElements = Size;
 		}

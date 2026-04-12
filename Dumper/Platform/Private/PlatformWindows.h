@@ -75,6 +75,10 @@ public:
 	}
 };
 
+// On Windows the dumper IS the process (DLL injected, owns the console), so
+// exit(1) is the correct fatal-error path — matches the original behavior.
+[[noreturn]] inline void Dumper7FatalExit() { exit(1); }
+
 // Forward declarations
 namespace PlatformWindows
 {

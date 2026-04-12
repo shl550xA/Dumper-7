@@ -1,4 +1,5 @@
 #include "Arch_x86.h"
+#include <cstdint>
 
 /*
  * ARM64 stubs for the Architecture_x86_64 namespace. These exist so the generic
@@ -6,8 +7,28 @@
  * None of the helpers do anything meaningful on ARM - they all return NULL/false.
  */
 
-bool Architecture_x86_64::IsValid64BitVirtualAddress(const uintptr_t /*Address*/) { return false; }
-bool Architecture_x86_64::IsValid64BitVirtualAddress(const void* /*Address*/) { return false; }
+bool Architecture_x86_64::IsValid64BitVirtualAddress(const uintptr_t Address)
+{
+	// PAC'ed pointers arent supported
+
+	// support malloc'ed pointers?,
+	// https://cs.android.com/android/platform/superproject/+/android-16.0.0_r1:bionic/libc/bionic/malloc_tagged_pointers.h;l=50
+	constexpr uintptr_t BionicMemoryTag = 0xB4;
+	auto without_tag = [](uintptr_t A) {
+		// strip ONLY tag bits so < check below will fail for invalid tag
+		return A & ~(BionicMemoryTag << 56);
+	};
+
+	// CONFIG_ARM64_VA_BITS = 39,
+	// https://cs.android.com/android/kernel/superproject/+/common-android-mainline:common/include/asm-generic/access_ok.h;l=31
+	constexpr uintptr_t UserMaxAddress = (uintptr_t)1 << 39;
+	return Address != 0 && without_tag(Address) < UserMaxAddress;
+}
+
+bool Architecture_x86_64::IsValid64BitVirtualAddress(const void* Address)
+{
+	return IsValid64BitVirtualAddress(reinterpret_cast<uintptr_t>(Address));
+}
 
 bool Architecture_x86_64::Is32BitRIPRelativeJump(const uintptr_t /*Address*/) { return false; }
 

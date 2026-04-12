@@ -40,7 +40,11 @@ namespace Settings
 		inline std::string GameName = "";
 		inline std::string GameVersion = "";
 
+#if defined(__ANDROID__)
+		inline const char* SDKGenerationPath = nullptr;
+#else
 		inline constexpr const char* SDKGenerationPath = "C:/Dumper-7";
+#endif
 	}
 
 	namespace CppGenerator

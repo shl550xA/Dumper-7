@@ -97,7 +97,7 @@ void FNameEntry::Init(const uint8_t* FirstChunkPtr, int64 NameEntryStringOffset)
 			}
 
 			if (HeaderWithoutNumber & NameWideMask)
-				return std::wstring(reinterpret_cast<const wchar_t*>(NameEntry + Off::FNameEntry::NamePool::StringOffset), NameLen);
+				return TCHARToWString(reinterpret_cast<const TCHAR*>(NameEntry + Off::FNameEntry::NamePool::StringOffset), NameLen);
 
 			return UtfN::StringToWString(std::string(reinterpret_cast<const char*>(NameEntry + Off::FNameEntry::NamePool::StringOffset), NameLen));
 		};
@@ -134,7 +134,7 @@ void FNameEntry::Init(const uint8_t* FirstChunkPtr, int64 NameEntryStringOffset)
 			const void* NameString = reinterpret_cast<void*>(NameEntry + Off::FNameEntry::NameArray::StringOffset);
 
 			if (NameIdx & NameWideMask)
-				return std::wstring(reinterpret_cast<const wchar_t*>(NameString));
+				return TCHARToWString(reinterpret_cast<const TCHAR*>(NameString));
 
 			return UtfN::StringToWString<std::string>(reinterpret_cast<const char*>(NameString));
 		};

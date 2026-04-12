@@ -140,7 +140,6 @@ void Settings::Config::Load()
 	SDKNamespaceName = SDKNamespace;
 	SleepTimeout = std::max(GetPrivateProfileIntA("Settings", "SleepTimeout", 0, ConfigPath), 0);
 #else
-	/* INI parsing is not available on this platform - leave defaults in place. */
 	(void)ConfigPath;
 #endif
 }

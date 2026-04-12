@@ -221,7 +221,7 @@ void StructManager::InitSizesAndIsFinal()
 			{
 				std::cerr << "\n\n\nDumper-7: Error, struct wasn't found in 'StructInfoOverrides'! Exiting...\n\n\n" << std::endl;
 				Sleep(10000);
-				exit(1);
+				Dumper7FatalExit();
 			}
 
 			StructInfo& Info = It->second;

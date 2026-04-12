@@ -20,6 +20,55 @@ typedef unsigned __int16 uint16;
 typedef unsigned __int32 uint32;
 typedef unsigned __int64 uint64;
 
+// UE4/UE5 uses UTF-16 internally for TCHAR on all platforms. On Windows
+// wchar_t is 16-bit and matches, but on Android wchar_t is 32-bit. TCHAR
+// aliases the native 16-bit character type so FString/FName memory layouts
+// are correct when reading from the live engine.
+#if defined(_WIN32) || defined(_WIN64)
+using TCHAR = wchar_t;
+#else
+using TCHAR = char16_t;
+#endif
+
+// Convert a TCHAR buffer to std::wstring. On Windows this is a trivial copy;
+// on Android it widens each 16-bit code unit to a 32-bit wchar_t.
+inline std::wstring TCHARToWString(const TCHAR* Str, int32 Len)
+{
+#if defined(_WIN32) || defined(_WIN64)
+	return std::wstring(Str, Len);
+#else
+	std::wstring Out;
+	Out.reserve(Len);
+	for (int32 i = 0; i < Len; ++i)
+		Out += static_cast<wchar_t>(Str[i]);
+	return Out;
+#endif
+}
+
+inline std::wstring TCHARToWString(const TCHAR* Str)
+{
+	int32 Len = 0;
+	while (Str[Len] != 0)
+		++Len;
+	return TCHARToWString(Str, Len);
+}
+
+// strlen equivalent for TCHAR*
+inline int32 TCHARLen(const TCHAR* Str)
+{
+	int32 Len = 0;
+	while (Str[Len] != 0)
+		++Len;
+	return Len;
+}
+
+// strcmp equivalent for TCHAR*
+inline int TCHARCmp(const TCHAR* A, const TCHAR* B)
+{
+	while (*A && *B && *A == *B) { ++A; ++B; }
+	return static_cast<int>(*A) - static_cast<int>(*B);
+}
+
 
 #define ENUM_OPERATORS(EEnumClass)																																		\
 																																										\
