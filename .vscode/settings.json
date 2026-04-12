@@ -1,0 +1,12 @@
+{
+  "cmake.configureOnOpen": true,
+  "cmake.cmakePath": "${env:ANDROID_SDK_ROOT}/cmake/${env:ANDROID_CMAKE_VERSION}/bin/cmake",
+  "cmake.options.statusBarVisibility": "visible",
+  "clangd.path": "${env:ANDROID_NDK_ROOT}/${env:ANDROID_NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/clangd",
+  "clangd.checkUpdates": false,
+  "clangd.restartAfterCrash": true,
+  "clangd.serverCompletionRanking": true,
+  "clangd.detectExtensionConflicts": true,
+  // "editor.formatOnSave": true,
+  "editor.inlayHints.enabled": "off"
+}
