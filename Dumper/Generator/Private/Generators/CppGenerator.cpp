@@ -610,8 +610,8 @@ R"({{
 }})", (bIsNameUnique ? "" : "_FULLNAME"), NameText);
 	}
 
-	/* ClassName always uses the short name, and it's a wide string for FString */
-	NameText = CppSettings::XORString ? std::format("{}(L\"{}\")", CppSettings::XORString, Struct.GetRawName()) : std::format("L\"{}\"", Struct.GetRawName());
+	/* ClassName always uses the short name, wrapped in DUMPER7_TEXT so it becomes L"..." on Windows and u"..." on non-Windows */
+	NameText = CppSettings::XORString ? std::format("{}(DUMPER7_TEXT(\"{}\"))", CppSettings::XORString, Struct.GetRawName()) : std::format("DUMPER7_TEXT(\"{}\")", Struct.GetRawName());
 
 	StaticName.Body = std::format(
 R"({{
@@ -1596,9 +1596,11 @@ void CppGenerator::Generate()
 	StreamType UnrealContainers(MainFolder / "UnrealContainers.hpp");
 	GenerateUnrealContainers(UnrealContainers);
 
-	// Generate UtfN.hpp
+#ifdef _WIN32
+	// Generate UtfN.hpp (Windows only — Itanium ABI clang rejects its SFINAE)
 	StreamType UnicodeLib(MainFolder / "UtfN.hpp");
 	GenerateUnicodeLib(UnicodeLib);
+#endif
 
 	StreamType DebugAssertions;
 
@@ -3463,6 +3465,7 @@ void CppGenerator::GenerateBasicFiles(StreamType& BasicHpp, StreamType& BasicCpp
 
 )", Settings::Config::SDKNamespaceName, CppSettings::ParamNamespaceName);
 
+#ifdef _WIN32
 	const std::string CustomIncludes = std::format(R"(#define VC_EXTRALEAN
 #define WIN32_LEAN_AND_MEAN
 {}
@@ -3471,8 +3474,21 @@ void CppGenerator::GenerateBasicFiles(StreamType& BasicHpp, StreamType& BasicCpp
 #include <type_traits>
 )", (!Settings::Config::SDKNamespaceName.empty() ? SDKMacroDefinitions : ""));
 
+	const char* BasicCppIncludes = "#include <Windows.h>";
+#else
+	// Non-Windows host dumper: omit Win32 hint macros and <Windows.h>. Pull <cstring>/<cmath>
+	// directly since the non-Windows build path can no longer rely on transitive inclusion.
+	const std::string CustomIncludes = std::format(R"({}
+#include <string>
+#include <functional>
+#include <type_traits>
+)", (!Settings::Config::SDKNamespaceName.empty() ? SDKMacroDefinitions : ""));
+
+	const char* BasicCppIncludes = "#include <cstring>\n#include <cmath>";
+#endif
+
 	WriteFileHead(BasicHpp, nullptr, EFileType::BasicHpp, "Basic file containing structs required by the SDK", CustomIncludes);
-	WriteFileHead(BasicCpp, nullptr, EFileType::BasicCpp, "Basic file containing function-implementations from Basic.hpp", "#include <Windows.h>");
+	WriteFileHead(BasicCpp, nullptr, EFileType::BasicCpp, "Basic file containing function-implementations from Basic.hpp", BasicCppIncludes);
 
 
 	/* use namespace of UnrealContainers */
@@ -3541,9 +3557,11 @@ namespace InSDKUtils
 	BasicHpp << "}\n\n";
 	// End Namespace 'InSDKUtils'
 
-	/* Custom 'GetImageBase' function */
+#ifdef _WIN32
+	/* Custom 'GetImageBase' function (Windows only — on non-Windows, consumer must supply their own definition) */
 	BasicCpp << std::format(R"(uintptr_t InSDKUtils::GetImageBase()
 {})", Settings::CppGenerator::GetImageBaseFuncBody);
+#endif
 
 	BasicHpp << R"(
 // Forward declarations because in-line forward declarations make the compiler think 'GetStaticClass()' is a class template
@@ -3571,7 +3589,7 @@ namespace BasicFilesImplUtils
 
 	UFunction* FindFunctionByFName(const FName* Name);
 
-	FName StringToName(const wchar_t* Name);
+	FName StringToName(const DUMPER7_TCHAR* Name);
 
 	UObject* GetDefaultObjectImpl(UClass* ClassInstance);
 }
@@ -3624,7 +3642,7 @@ UFunction* BasicFilesImplUtils::FindFunctionByFName(const FName* Name)
 	return nullptr;
 }
 
-FName BasicFilesImplUtils::StringToName(const wchar_t* Name)
+FName BasicFilesImplUtils::StringToName(const DUMPER7_TCHAR* Name)
 {
 	return UKismetStringLibrary::Conv_StringToName(FString(Name));
 }
@@ -3639,11 +3657,11 @@ UObject* BasicFilesImplUtils::GetDefaultObjectImpl(UClass* Class)
 )";
 
 	BasicHpp << R"(
-const FName& GetStaticName(const wchar_t* Name, FName& StaticName);
+const FName& GetStaticName(const DUMPER7_TCHAR* Name, FName& StaticName);
 )";
 
 	BasicCpp << R"(
-const FName& GetStaticName(const wchar_t* Name, FName& StaticName)
+const FName& GetStaticName(const DUMPER7_TCHAR* Name, FName& StaticName)
 {
 	if (StaticName.IsNone())
 	{
@@ -4482,7 +4500,7 @@ R"({
 
 	std::string GetRawStringWithAppendString = std::format(
 		R"({{
-	wchar_t buffer[1024];
+	DUMPER7_TCHAR buffer[1024];
     FString TempString(buffer, 0, 1024);
 
 	if (!AppendString)
@@ -4496,7 +4514,7 @@ R"({
 
 	constexpr const char* GetRawStringWithInlinedAppendString =
 		R"({
-	wchar_t buffer[1024];
+	DUMPER7_TCHAR buffer[1024];
     FString TempString(buffer, 0, 1024);
 
 	if (!AppendString)
@@ -5872,13 +5890,21 @@ using TActorBasedCycleFixup = CyclicDependencyFixupImpl::TCyclicClassFixup<Under
 /* See https://github.com/Fischsalat/UnrealContainers/blob/master/UnrealContainers/UnrealContainersNoAlloc.h */
 void CppGenerator::GenerateUnrealContainers(StreamType& UEContainersHeader)
 {
-	WriteFileHead(UEContainersHeader, nullptr, EFileType::UnrealContainers, 
-		"Container implementations with iterators. See https://github.com/Fischsalat/UnrealContainers", "#include <string>\n#include <stdexcept>\n#include <iostream>\n#include <optional>\n#include \"UtfN.hpp\"");
+	WriteFileHead(UEContainersHeader, nullptr, EFileType::UnrealContainers,
+		"Container implementations with iterators. See https://github.com/Fischsalat/UnrealContainers", "#include <string>\n#include <stdexcept>\n#include <iostream>\n#include <optional>\n#ifdef _WIN32\n#include \"UtfN.hpp\"\n#endif");
 
 
 	UEContainersHeader << R"(
+#ifdef _WIN32
+using DUMPER7_TCHAR = wchar_t;
+#define DUMPER7_TEXT(x) L##x
+#else
+using DUMPER7_TCHAR = char16_t;
+#define DUMPER7_TEXT(x) u##x
+#endif
+
 namespace UC
-{	
+{
 	typedef int8_t  int8;
 	typedef int16_t int16;
 	typedef int32_t int32;
@@ -6094,7 +6120,7 @@ namespace UC
 	class TArray
 	{
 	private:
-		template<typename ArrayElementType>
+		template<typename FriendArrayElementType>
 		friend class TAllocatedArray;
 
 		template<typename SparseArrayElementType>
@@ -6234,7 +6260,7 @@ namespace UC
 		template<typename T> friend Iterators::TArrayIterator<T> end  (const TArray& Array);
 	};
 
-	class FString : public TArray<wchar_t>
+	class FString : public TArray<DUMPER7_TCHAR>
 	{
 	public:
 		friend std::ostream& operator<<(std::ostream& Stream, const UC::FString& Str) { return Stream << Str.ToString(); }
@@ -6242,16 +6268,16 @@ namespace UC
 	public:
 		using TArray::TArray;
 
-		FString(const wchar_t* Str)
+		FString(const DUMPER7_TCHAR* Str)
 		{
-			const uint32 NullTerminatedLength = static_cast<uint32>(wcslen(Str) + 0x1);
+			const uint32 NullTerminatedLength = static_cast<uint32>(std::char_traits<DUMPER7_TCHAR>::length(Str) + 0x1);
 
-			Data = const_cast<wchar_t*>(Str);
+			Data = const_cast<DUMPER7_TCHAR*>(Str);
 			NumElements = NullTerminatedLength;
 			MaxElements = NullTerminatedLength;
 		}
 
-		FString(wchar_t* Str, int32 Num, int32 Max)
+		FString(DUMPER7_TCHAR* Str, int32 Num, int32 Max)
 		{
 			Data = Str;
 			NumElements = Num;
@@ -6261,29 +6287,87 @@ namespace UC
 	public:
 		inline std::string ToString() const
 		{
-			if (*this)
+			if (!*this) return "";
+#ifdef _WIN32
+			return UtfN::Utf16StringToUtf8String<std::string>(Data, NumElements  - 1); // Exclude null-terminator
+#else
+			// Inlined surrogate-aware UTF-16 -> UTF-8 converter. DUMPER7_TCHAR is 2 bytes on both platforms.
+			std::string Out;
+			Out.reserve(NumElements);
+			const int32 Len = NumElements - 1;
+			for (int32 i = 0; i < Len; ++i)
 			{
-				return UtfN::Utf16StringToUtf8String<std::string>(Data, NumElements  - 1); // Exclude null-terminator
-			}
+				uint32_t cp = static_cast<uint16_t>(Data[i]);
+				if (cp >= 0xD800 && cp <= 0xDBFF && (i + 1) < Len)
+				{
+					const uint32_t low = static_cast<uint16_t>(Data[i + 1]);
+					if (low >= 0xDC00 && low <= 0xDFFF)
+					{
+						cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+						++i;
+					}
+					else
+					{
+						Out.append("\xEF\xBF\xBD", 3);
+						continue;
+					}
+				}
+				else if (cp >= 0xDC00 && cp <= 0xDFFF)
+				{
+					Out.append("\xEF\xBF\xBD", 3);
+					continue;
+				}
 
-			return "";
+				if (cp < 0x80)
+				{
+					Out.push_back(static_cast<char>(cp));
+				}
+				else if (cp < 0x800)
+				{
+					Out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+					Out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+				}
+				else if (cp < 0x10000)
+				{
+					Out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+					Out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+					Out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+				}
+				else
+				{
+					Out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+					Out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+					Out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+					Out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+				}
+			}
+			return Out;
+#endif
 		}
 
+		inline std::u16string ToU16String() const
+		{
+			if (!*this) return u"";
+			return std::u16string(reinterpret_cast<const char16_t*>(Data), NumElements - 1);
+		}
+
+#ifdef _WIN32
 		inline std::wstring ToWString() const
 		{
 			if (*this)
-				return std::wstring(Data);
+				return std::wstring(Data, Data + NumElements - 1);
 
 			return L"";
 		}
+#endif
 
 	public:
-		inline       wchar_t* CStr()       { return Data; }
-		inline const wchar_t* CStr() const { return Data; }
+		inline       DUMPER7_TCHAR* CStr()       { return Data; }
+		inline const DUMPER7_TCHAR* CStr() const { return Data; }
 
 	public:
-		inline bool operator==(const FString& Other) const { return Other ? NumElements == Other.NumElements && wcscmp(Data, Other.Data) == 0 : false; }
-		inline bool operator!=(const FString& Other) const { return Other ? NumElements != Other.NumElements || wcscmp(Data, Other.Data) != 0 : true; }
+		inline bool operator==(const FString& Other) const { return Other ? NumElements == Other.NumElements && std::char_traits<DUMPER7_TCHAR>::compare(Data, Other.Data, NumElements) == 0 : false; }
+		inline bool operator!=(const FString& Other) const { return Other ? NumElements != Other.NumElements || std::char_traits<DUMPER7_TCHAR>::compare(Data, Other.Data, NumElements) != 0 : true; }
 	};
 
 	// Utf8String that assumes C-APIs (strlen, strcmp) behaviour works for char8_t like Ansi strings, execept it's counting/comparing bytes not characters.
@@ -6329,6 +6413,7 @@ namespace UC
 			return "";
 		}
 
+#ifdef _WIN32
 		inline std::wstring ToWString() const
 		{
 			if (*this)
@@ -6336,6 +6421,7 @@ namespace UC
 
 			return L"";
 		}
+#endif
 
 	public:
 		inline       char8_t* CStr()       { return Data; }
@@ -6381,6 +6467,7 @@ namespace UC
 			return "";
 		}
 
+#ifdef _WIN32
 		inline std::wstring ToWString() const
 		{
 			if (*this)
@@ -6388,6 +6475,7 @@ namespace UC
 
 			return L"";
 		}
+#endif
 
 	public:
 		inline       char* CStr() { return Data; }
@@ -6447,7 +6535,7 @@ namespace UC
 	public:
 		FAllocatedString(int32 Size)
 		{
-			Data = static_cast<wchar_t*>(malloc(Size * sizeof(wchar_t)));
+			Data = static_cast<DUMPER7_TCHAR*>(malloc(Size * sizeof(DUMPER7_TCHAR)));
 			NumElements = 0x0;
 			MaxElements = Size;
 		}
