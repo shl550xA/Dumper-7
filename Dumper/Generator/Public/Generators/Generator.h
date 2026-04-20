@@ -69,9 +69,7 @@ public:
             {
                 bDumpedGObjects = true;
                 ObjectArray::DumpObjects(DumperFolder);
-
-                if (Settings::Internal::bUseFProperty)
-                    ObjectArray::DumpObjectsWithProperties(DumperFolder);
+                ObjectArray::DumpObjectsWithProperties(DumperFolder);
             }
 
             if (!bDumepdEditorOnlyMetadata)
