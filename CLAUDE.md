@@ -14,19 +14,21 @@ Three supported build systems. Always build **Release** for use; Debug only when
 - **CMake** (see [UsingCMake.md](UsingCMake.md)): `cmake --preset <preset>` then `cmake --build build --config Release`. Sources are picked up by `file(GLOB_RECURSE)` over `Dumper/*.cpp`, so new files require a reconfigure. Requires C++20.
 - **xmake** (see [Xmake.md](Xmake.md)): driven by [xmake.lua](xmake.lua).
 
-There is no test suite. Validation is done by injecting the resulting DLL/SO into a game and inspecting the generated SDK / console output.
+No runtime test suite. Validation is done by injecting the resulting DLL/SO into a game and inspecting the generated SDK / console output. [SDKTest/](SDKTest/) is a compile-only test for the *generated* SDK — `cmake --build SDKTest/build/android-arm64-debug -j` compiles every emitted TU and exercises every `static_assert` if `SDK_SKIP_STATIC_ASSERTS=OFF`.
 
 ### Android ARM64
 
 The `android-arm64-{debug,release,prod}` presets in [CMakePresets.json](CMakePresets.json) build `libDumper-7.so` for `arm64-v8a` against NDK API level 28. Requires `ANDROID_NDK_ROOT`, `ANDROID_NDK_VERSION`, `ANDROID_SDK_ROOT`, and `ANDROID_CMAKE_VERSION` in the environment.
 
-The platform layer is functional: module enumeration (`dl_iterate_phdr`), address validity (`/proc/self/maps` parsing + `PROCMAP_QUERY` fast path on kernel 6.11+), segment iteration, pattern scanning, and vtable walking all work. The dumper can produce a full SDK on Android **with manual offset overrides** for GObjects, FName::AppendString, and ProcessEvent in [Generator.cpp](Dumper/Generator/Private/Generators/Generator.cpp).
+**Verified target**: UE 4.18 / PUBG Mobile (`com.tencent.ig`). With the per-game manual offset overrides in `Generator::InitEngineCore()`, the dumper produces a full C++ SDK whose 800+ generated translation units compile cleanly on clang Itanium (NDK r29) with `SDK_SKIP_STATIC_ASSERTS=OFF` — every emitted `static_assert` on struct size / alignment / member offset passes. The three generator-side fixes that enable this are documented in [SDKTest/GENERATOR_TODO.md §4.*-gen](SDKTest/GENERATOR_TODO.md) and landed in commit `fb2bff2`.
+
+The platform layer is functional: module enumeration (`dl_iterate_phdr`), address validity (`/proc/self/maps` parsing + `PROCMAP_QUERY` fast path on kernel 6.11+), segment iteration, pattern scanning, and vtable walking all work.
 
 **What requires manual overrides on Android**: auto-discovery of `FName::AppendString`, `GNames`/`NamePool`, and `ProcessEvent` relies on x86 signature scans (`LEA`/`PUSH` opcode decoding in `FindByStringInAllSections`) that don't apply to ARM64. Until ARM64 ADRP+ADD/LDR decoders are implemented, these must be supplied via `Generator::InitEngineCore()`. See [ROADMAP.md](ROADMAP.md) for details.
 
 **SDK output path**: defaults to `/data/data/<package>/Dumper-7/` (derived from `__progname` at runtime). Logs go to `adb logcat -s Dumper-7`.
 
-**Testing on device**: `setenforce 0`, push `libDumper-7.so` to `/data/local/tmp/`, launch the game, wait for `libUE4.so` to load, inject with `AndKittyInjector -pkg <pkg> -lib /data/local/tmp/libDumper-7.so -dl_memfd`.
+**Testing on device**: `setenforce 0`, push `libDumper-7.so` to `/data/local/tmp/`, launch the game, wait for `libUE4.so` to load, inject with `AndKittyInjector -pkg <pkg> -lib /data/local/tmp/libDumper-7.so -dl_memfd`. Helper scripts in [tools/](tools/): `push_and_inject.sh` (push+inject one-shot), `pull_sdk.sh` (tar the on-device SDK, pull, extract into `SDKTest/CppSDK/`), `logcat.sh` (filtered logs).
 
 ## Architecture
 
@@ -56,9 +58,11 @@ The four generator backends, all under [Dumper/Generator/Private/Generators/](Du
 
 Whether the target engine uses `UProperty` (UE ≤4.24-ish) or `FProperty` (UE 4.25+) is detected during `InitEngineCore` and stored in `Settings::Internal::bUseFProperty`. Most engine wrappers branch on this; when adding new property handling, follow the existing pattern rather than assuming one form.
 
-### Key invariant: `TCHAR`
+### Key invariant: `TCHAR` (dumper-internal) and `DUMPER7_TCHAR` (emitted)
 
-UE4/UE5 uses UTF-16 internally for `TCHAR`/`FString` on all platforms. On Windows `wchar_t` is 16-bit and matches directly; on Android `wchar_t` is 32-bit, so `TCHAR` is aliased to `char16_t`. See [Enums.h](Dumper/Engine/Public/Unreal/Enums.h) for the typedef and `TCHARToWString`/`TCHARLen`/`TCHARCmp` helpers. `FString` extends `TArray<TCHAR>`, not `TArray<wchar_t>`.
+UE4/UE5 uses UTF-16 internally for `TCHAR`/`FString` on all platforms. On Windows `wchar_t` is 16-bit and matches directly; on Android `wchar_t` is 32-bit, so the dumper-side `TCHAR` typedef is aliased to `char16_t`. See [Enums.h](Dumper/Engine/Public/Unreal/Enums.h) for the typedef and `TCHARToWString`/`TCHARLen`/`TCHARCmp` helpers. `FString` (dumper-side, in [UnrealContainers.h](Dumper/Engine/Public/Unreal/UnrealContainers.h)) extends `TArray<TCHAR>`, not `TArray<wchar_t>`.
+
+The *emitted* SDK has its own abstraction: `DUMPER7_TCHAR` + `DUMPER7_TEXT(x)` (prefixed to avoid collision with Windows' `<tchar.h>`). The emitter defines them in the generated `UnrealContainers.hpp` so a single generated SDK compiles on both MSVC and clang Itanium without runtime narrowing. See [CppGenerator.cpp:GenerateUnrealContainers](Dumper/Generator/Private/Generators/CppGenerator.cpp).
 
 ## Modifying for a specific game
 
