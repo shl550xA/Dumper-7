@@ -52,9 +52,21 @@ std::string CppGenerator::MakeMemberStringWithoutName(const std::string& Type)
 	return '\t' + Type + ";\n";
 }
 
-std::string CppGenerator::GenerateBytePadding(const int32 Offset, const int32 PadSize, std::string&& Reason)
+std::string CppGenerator::GenerateBytePadding(const int32 Offset, const int32 PadSize, std::string&& Reason
+#ifndef _WIN32
+    , int32 Alignas
+#endif
+)
 {
-	return MakeMemberString("uint8", std::format("Pad_{:X}[0x{:X}]", Offset, PadSize), std::format("0x{:04X}(0x{:04X})({})", Offset, PadSize, std::move(Reason)));
+	std::string Type = "uint8";
+#ifndef _WIN32
+	// On Itanium ABI, a derived struct's leading padding member may need
+	// alignas(alignof(Super)) to land at the MSVC-computed offset instead of
+	// slotting into the base's tail padding. See SDKTest/GENERATOR_TODO.md §4.3-gen.
+	if (Alignas > 0)
+		Type = std::format("alignas(0x{:X}) uint8", Alignas);
+#endif
+	return MakeMemberString(Type, std::format("Pad_{:X}[0x{:X}]", Offset, PadSize), std::format("0x{:04X}(0x{:04X})({})", Offset, PadSize, std::move(Reason)));
 }
 
 std::string CppGenerator::GenerateBitPadding(uint8 UnderlayingSizeBytes, const uint8 PrevBitPropertyEndBit, const int32 Offset, const int32 PadSize, std::string&& Reason)
@@ -106,6 +118,7 @@ std::string CppGenerator::GenerateMembers(const StructWrapper& Struct, const Mem
 
 	const int32 SuperTrailingPaddingSize = SuperSize - SuperLastMemberEnd;
 	bool bIsFirstSizedMember = true;
+	bool bEmittedAny = false;
 
 	for (const PropertyWrapper& Member : Members.IterateMembers())
 	{
@@ -125,10 +138,30 @@ std::string CppGenerator::GenerateMembers(const StructWrapper& Struct, const Mem
 		{
 			OutMembers += GenerateBitPadding(PrevBitPropertySize, PrevBitPropertyEndBit, PrevBitPropertyOffset, PrevNumBitsInUnderlayingType - PrevBitPropertyEndBit, "Fixing Bit-Field Size For New Byte [ Dumper-7 ]");
 			PrevBitPropertyEndBit = 0;
+			bEmittedAny = true;
 		}
 
 		if (MemberOffset > PrevPropertyEnd && !bIsUnion)
+		{
+#ifndef _WIN32
+			// §4.3-gen: when the first derived member is padding, annotate it
+			// with alignas(alignof(Super)) so Itanium doesn't slot it into the
+			// base's tail padding. The three conditions (first member, offset
+			// and size both super-aligned) guarantee this is layout-neutral on
+			// MSVC.
+			const int32 LeadPadSize = MemberOffset - PrevPropertyEnd;
+			const bool bApplyLeadingAlignas =
+				!bEmittedAny
+				&& SuperAlign > 1
+				&& (PrevPropertyEnd % SuperAlign) == 0
+				&& (LeadPadSize % SuperAlign) == 0;
+			const int32 LeadAlignas = bApplyLeadingAlignas ? SuperAlign : 0;
+			OutMembers += GenerateBytePadding(PrevPropertyEnd, LeadPadSize, "Fixing Size After Last Property [ Dumper-7 ]", LeadAlignas);
+#else
 			OutMembers += GenerateBytePadding(PrevPropertyEnd, MemberOffset - PrevPropertyEnd, "Fixing Size After Last Property [ Dumper-7 ]");
+#endif
+			bEmittedAny = true;
+		}
 
 		bIsFirstSizedMember = Member.IsZeroSizedMember() || Member.IsStatic();
 
@@ -188,6 +221,8 @@ std::string CppGenerator::GenerateMembers(const StructWrapper& Struct, const Mem
 		{
 			OutMembers += MakeMemberString(GetMemberTypeString(Member, PackageIndex, bAllowForConstPtrMembers), MemberName, std::move(Comment));
 		}
+
+		bEmittedAny = true;
 	}
 
 	const int32 MissingByteCount = Struct.GetUnalignedSize() - PrevPropertyEnd;
@@ -686,10 +721,19 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 
 	std::string AlignmentString = "";
 
+#ifdef _WIN32
 	if (Struct.ShouldUseExplicitAlignment())
 		AlignmentString = std::format("alignas(0x{:02X}) ", Struct.GetAlignment());
 	else if (bHasReusedTrailingPadding)
 		AlignmentString = std::format("SDK_ALIGN(0x{:02X}) ", Struct.GetAlignment());
+#else
+	// Non-Windows host: SDK_ALIGN is the same as alignas anyway (see
+	// Basic.hpp), but using alignas uniformly keeps downstream scripts
+	// simpler. The empty-dtor emission below handles Itanium tail-
+	// padding reuse, so SDK_ALIGN is no longer structurally special.
+	if (Struct.ShouldUseExplicitAlignment() || bHasReusedTrailingPadding)
+		AlignmentString = std::format("alignas(0x{:02X}) ", Struct.GetAlignment());
+#endif
 
 	StructFile << std::format(R"(
 // {}
@@ -700,13 +744,28 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
   , StructSizeWithoutSuper
   , StructSize
   , SuperSize
+#ifdef _WIN32
   , bHasReusedTrailingPadding ? "#pragma pack(push, 0x1)\n" : ""
+#else
+  // pragma pack is redundant once the tail-reused base has a user-provided
+  // empty dtor (emitted below); Dumper already emits explicit Pad_XXXX members
+  // so pack controls nothing here. See SDKTest/GENERATOR_TODO.md §4.2-gen.
+  , ""
+#endif
   , bIsTemplatedType ? (Struct.GetCustomTemplateText() + "\n") : ""
   , bIsClass ? "class" : (bIsUnion ? "union" : "struct")
   , AlignmentString
   , UniqueName
   , Settings::CppGenerator::bAddFinalSpecifier && Struct.IsFinal() ? " final" : ""
   , bHasValidSuper ? (" : public " + UniqueSuperName) : "");
+
+#ifndef _WIN32
+	// On Itanium ABI, a base whose tail padding is reused by a child must be
+	// non-trivial-for-layout; a user-provided empty destructor is sufficient.
+	// MSVC reuses tail padding unconditionally so doesn't need this.
+	if (bHasReusedTrailingPadding)
+		StructFile << std::format("public:\n\t~{}() {{}}\n\n", UniqueName);
+#endif
 
 	MemberManager Members = Struct.GetMembers();
 
@@ -735,8 +794,10 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 
 	StructFile << "};\n";
 
+#ifdef _WIN32
 	if (bHasReusedTrailingPadding)
 		StructFile << "#pragma pack(pop)\n";
+#endif
 
 	if constexpr (Settings::Debug::bGenerateAssertionFile)
 	{

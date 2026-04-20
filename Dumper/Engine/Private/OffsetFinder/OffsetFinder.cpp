@@ -752,7 +752,12 @@ int32_t OffsetFinder::FindStructBaseChainOffset()
 		Struct = ObjectArray::FindStructFast("struct");
 
 	const int32 UStructStart = Struct.GetSuper().GetStructSize();
-	const int32 UStructEnd = UStructStart + Struct.GetStructSize();
+	// UStructEnd must be UStruct's own reflected size (PropertiesSize), not
+	// UStructStart + that — adding UField's size over-shoots UStruct's end by
+	// 0x30 and lets the scan find UClass's FClassBaseChain at 0x88 on UE 4.18,
+	// producing a false-positive FStructBaseChain offset. See
+	// SDKTest/GENERATOR_TODO.md §4.1-gen.
+	const int32 UStructEnd = Struct.GetStructSize();
 
 	// If the members of UStruct come right after UField, FStructBaseChain either doesn't exist or is empty
 	if (UStructStart == Off::UStruct::ChildProperties || UStructStart == Off::UStruct::Children)
@@ -783,7 +788,23 @@ int32_t OffsetFinder::FindStructBaseChainOffset()
 	Infos.push_back({ AActor.GetAddress(),              CountSuperClasses(AActor)            });
 
 	// FStructBaseChain::NumStructBasesInChainMinusOne is at offset 0x8, after a pointer
-	return FindOffset(Infos, UStructStart, UStructEnd) - sizeof(void*);
+	const int32 FoundOffset = FindOffset(Infos, UStructStart, UStructEnd);
+	if (FoundOffset == OffsetNotFound)
+		return OffsetNotFound;
+
+	// FindOffset doesn't require all Infos to match at the same offset; a
+	// single spurious int32 match can carry the result forward. Validate that
+	// every Info's int32 at the returned offset really equals its expected
+	// CountSuperClasses value before accepting — otherwise we're emitting a
+	// bogus BaseChain member. See SDKTest/GENERATOR_TODO.md §4.1-gen.
+	for (const auto& [ObjectPtr, Expected] : Infos)
+	{
+		const int32_t ActualValue = *reinterpret_cast<const int32_t*>(static_cast<const uint8_t*>(ObjectPtr) + FoundOffset);
+		if (ActualValue != Expected)
+			return OffsetNotFound;
+	}
+
+	return FoundOffset - sizeof(void*);
 }
 
 /* UFunction */
