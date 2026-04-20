@@ -28,7 +28,7 @@ The platform layer is functional: module enumeration (`dl_iterate_phdr`), addres
 
 **SDK output path**: defaults to `/data/data/<package>/Dumper-7/` (derived from `__progname` at runtime). Logs go to `adb logcat -s Dumper-7`.
 
-**Testing on device**: push `libDumper-7.so` to `/data/local/tmp/`, launch the game, wait for `libUE4.so` to load, inject with `AndKittyInjector -pkg <pkg> -lib /data/local/tmp/libDumper-7.so -dl_memfd` (`-dl_memfd` avoids needing `setenforce 0`). Helper scripts in [tools/](tools/): `push_and_inject.sh` (push+inject one-shot), `pull_sdk.sh` (tar the on-device SDK and pull it to host), `logcat.sh` (filtered logs).
+**Testing on device**: push `libDumper-7.so` to `/data/local/tmp/`, launch the game, wait for `libUE4.so` to load, inject with `AndKittyInjector -pkg <pkg> -lib /data/local/tmp/libDumper-7.so -dl_memfd` (`-dl_memfd` avoids needing `setenforce 0`). Helper scripts in [tools/](tools/): `push_and_inject.sh` (push+inject one-shot), `pull_dump.sh` (tar the on-device dump folder — CppSDK, Dumpspace, Mappings, etc. — and pull it to host), `logcat.sh` (filtered logs).
 
 ## Architecture
 

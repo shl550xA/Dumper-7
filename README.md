@@ -62,7 +62,7 @@ injection tool such as
 5. Watch progress: `adb logcat -s Dumper-7`.
 6. The SDK is written under `/data/data/<package>/Dumper-7/`.
    Pull it to the host with the helper script
-   [tools/pull_sdk.sh](tools/pull_sdk.sh) (default package:
+   [tools/pull_dump.sh](tools/pull_dump.sh) (default package:
    `com.tencent.ig`).
 
 - **See [UsingTheSDK](UsingTheSDK.md) for a guide to get started, or to migrate from an old SDK.**
