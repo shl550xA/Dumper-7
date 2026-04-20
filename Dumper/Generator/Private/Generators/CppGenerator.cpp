@@ -62,7 +62,7 @@ std::string CppGenerator::GenerateBytePadding(const int32 Offset, const int32 Pa
 #ifndef _WIN32
 	// On Itanium ABI, a derived struct's leading padding member may need
 	// alignas(alignof(Super)) to land at the MSVC-computed offset instead of
-	// slotting into the base's tail padding. See SDKTest/GENERATOR_TODO.md §4.3-gen.
+	// slotting into the base's tail padding.
 	if (Alignas > 0)
 		Type = std::format("alignas(0x{:X}) uint8", Alignas);
 #endif
@@ -144,10 +144,10 @@ std::string CppGenerator::GenerateMembers(const StructWrapper& Struct, const Mem
 		if (MemberOffset > PrevPropertyEnd && !bIsUnion)
 		{
 #ifndef _WIN32
-			// §4.3-gen: when the first derived member is padding, annotate it
-			// with alignas(alignof(Super)) so Itanium doesn't slot it into the
-			// base's tail padding. The three conditions (first member, offset
-			// and size both super-aligned) guarantee this is layout-neutral on
+			// When the first derived member is padding, annotate it with
+			// alignas(alignof(Super)) so Itanium doesn't slot it into the base's
+			// tail padding. The three conditions (first member, offset and
+			// size both super-aligned) guarantee this is layout-neutral on
 			// MSVC.
 			const int32 LeadPadSize = MemberOffset - PrevPropertyEnd;
 			const bool bApplyLeadingAlignas =
@@ -749,7 +749,7 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 #else
   // pragma pack is redundant once the tail-reused base has a user-provided
   // empty dtor (emitted below); Dumper already emits explicit Pad_XXXX members
-  // so pack controls nothing here. See SDKTest/GENERATOR_TODO.md §4.2-gen.
+  // so pack controls nothing here.
   , ""
 #endif
   , bIsTemplatedType ? (Struct.GetCustomTemplateText() + "\n") : ""

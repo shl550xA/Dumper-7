@@ -755,8 +755,7 @@ int32_t OffsetFinder::FindStructBaseChainOffset()
 	// UStructEnd must be UStruct's own reflected size (PropertiesSize), not
 	// UStructStart + that — adding UField's size over-shoots UStruct's end by
 	// 0x30 and lets the scan find UClass's FClassBaseChain at 0x88 on UE 4.18,
-	// producing a false-positive FStructBaseChain offset. See
-	// SDKTest/GENERATOR_TODO.md §4.1-gen.
+	// producing a false-positive FStructBaseChain offset.
 	const int32 UStructEnd = Struct.GetStructSize();
 
 	// If the members of UStruct come right after UField, FStructBaseChain either doesn't exist or is empty
@@ -796,7 +795,7 @@ int32_t OffsetFinder::FindStructBaseChainOffset()
 	// single spurious int32 match can carry the result forward. Validate that
 	// every Info's int32 at the returned offset really equals its expected
 	// CountSuperClasses value before accepting — otherwise we're emitting a
-	// bogus BaseChain member. See SDKTest/GENERATOR_TODO.md §4.1-gen.
+	// bogus BaseChain member.
 	for (const auto& [ObjectPtr, Expected] : Infos)
 	{
 		const int32_t ActualValue = *reinterpret_cast<const int32_t*>(static_cast<const uint8_t*>(ObjectPtr) + FoundOffset);
