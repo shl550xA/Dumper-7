@@ -857,10 +857,17 @@ void CppGenerator::GenerateEnum(const EnumWrapper& Enum, StreamType& StructFile)
 	int32 NumValues = 0x0;
 	std::string MemberString;
 
+	// Mask enumerator values to the underlying type's width. UE sometimes uses
+	// uint64(-1) as a sentinel ("None" / "Unfetched" / etc.) even on enums
+	// whose underlying type is narrower than uint64. MSVC truncates silently
+	// but clang rejects the literal as a narrowing conversion.
+	const uint8 UnderlyingSize = Enum.GetUnderlyingTypeSize();
+	const uint64 ValueMask = UnderlyingSize >= 8 ? ~0ULL : ((1ULL << (UnderlyingSize * 8)) - 1);
+
 	for (const EnumCollisionInfo& Info : EnumValueIterator)
 	{
 		NumValues++;
-		MemberString += std::format("\t{:{}} = {},\n", Info.GetUniqueName(), 40, Info.GetValue());
+		MemberString += std::format("\t{:{}} = {},\n", Info.GetUniqueName(), 40, Info.GetValue() & ValueMask);
 	}
 
 	if (!MemberString.empty()) [[likely]]
