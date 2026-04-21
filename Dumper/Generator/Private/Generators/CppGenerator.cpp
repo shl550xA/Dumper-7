@@ -710,6 +710,40 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 			UniqueSuperName = GetCycleFixupType(Super, true);
 	}
 
+	/*
+	 * UE >= 4.22 declares UStruct with multi-inheritance:
+	 *   class UStruct : public UField, private FStructBaseChain { ... };
+	 * Emit it the same way — MSVC reuses FStructBaseChain's 4-byte tail padding for
+	 * UStruct::Size at 0x3C unconditionally; clang's Itanium ABI reuses that pad too
+	 * via the empty user-provided destructor emitted on FStructBaseChain in
+	 * GenerateBasicFiles (which makes the base non-trivial-for-layout).
+	 *
+	 * Emitting FStructBaseChain as a member at 0x30 (the previous approach) was a
+	 * layout error on every conforming compiler: a member's trailing padding is part
+	 * of its sizeof and can never be reused by the next member, so UStruct::Size
+	 * could not actually live at 0x3C under that emission.
+	 */
+	const bool bUStructNeedsBaseChainInheritance = Struct.IsUnrealStruct()
+		&& Struct.GetRawName() == "Struct"
+		&& Off::UStruct::StructBaseChain != -1;
+	if (bUStructNeedsBaseChainInheritance)
+	{
+		UniqueSuperName += ", private FStructBaseChain";
+		/*
+		 * GenerateMembers starts laying out own-members at SuperSize — but UField's
+		 * reflected size doesn't include the FStructBaseChain subobject we just added
+		 * as a second base. Without this bump, the member loop sees a gap between
+		 * UField's end and UStruct::Size (0x30 -> 0x3C) and emits a 12-byte Pad_30
+		 * filler that later overlaps with the FStructBaseChain base's data. Advance
+		 * by the base's data size (void* + int32 = 12 bytes, the 4-byte trailing pad
+		 * is intentionally reused by Size).
+		 */
+		constexpr int32 FStructBaseChainDataSize = sizeof(void*) + sizeof(int32);
+		SuperSize += FStructBaseChainDataSize;
+		UnalignedSuperSize += FStructBaseChainDataSize;
+		SuperLastMemberEnd = SuperSize;
+	}
+
 	const int32 StructSizeWithoutSuper = StructSize - SuperSize;
 
 	const bool bIsClass = Struct.IsClass();
@@ -1974,14 +2008,13 @@ void CppGenerator::InitPredefinedMembers()
 		});
 	}
 
-	if (Off::UStruct::StructBaseChain != -1)
-	{
-		UStructPredefs.Members.push_back({
-			.Comment = "NOT AUTO-GENERATED PROPERTY",
-			.Type = "struct FStructBaseChain", .Name = "BaseChain", .Offset = Off::UStruct::StructBaseChain, .Size = sizeof(void*) + sizeof(int32) + sizeof(uint32) /* PAD */, .ArrayDim = 0x1, .Alignment = alignof(void*),
-			.bIsStatic = false, .bIsZeroSizeMember = false, .bIsBitField = false, .BitIndex = 0xFF
-		});
-	}
+	/*
+	 * When UE has the fast-IsA FStructBaseChain, it's injected via multi-inheritance
+	 * from GenerateStruct (so UStruct's C++ layout matches UE's `class UStruct : UField,
+	 * private FStructBaseChain`). No PredefinedMember — adding BaseChain as a member
+	 * would produce a C++ layout where UStruct::Size can't actually land at 0x3C,
+	 * because member trailing padding is never reusable by subsequent members.
+	 */
 
 	PredefinedElements& UFunctionPredefs = PredefinedMembers[ObjectArray::FindClassFast("Function").GetIndex()];
 	UFunctionPredefs.Members =
@@ -2613,13 +2646,19 @@ R"({
 
 	if (Off::UStruct::StructBaseChain != -1)
 	{
+		/* FStructBaseChain is a private base of UStruct (see GenerateStruct). Its
+		 * members are directly accessible from within UStruct's own member functions,
+		 * and pointer conversion from `const UStruct*` to `const FStructBaseChain*` is
+		 * likewise allowed inside UStruct. */
 		IsStructOfTypeCode =
 R"({
 	if (!Base)
 		return false;
 
-	const int32 NumParentStructBasesInChainMinusOne = Base->BaseChain.NumStructBasesInChainMinusOne;
-	return NumParentStructBasesInChainMinusOne <= BaseChain.NumStructBasesInChainMinusOne && BaseChain.StructBaseChainArray[NumParentStructBasesInChainMinusOne] == &Base->BaseChain;
+	const FStructBaseChain* BaseAsChain = static_cast<const FStructBaseChain*>(Base);
+	const int32 NumParentStructBasesInChainMinusOne = BaseAsChain->NumStructBasesInChainMinusOne;
+	return NumParentStructBasesInChainMinusOne <= NumStructBasesInChainMinusOne
+		&& StructBaseChainArray[NumParentStructBasesInChainMinusOne] == BaseAsChain;
 })";
 	}
 
@@ -4865,6 +4904,21 @@ public:
 		},
 	};
 
+	/*
+	 * Empty user-provided destructor demotes FStructBaseChain from trivial to
+	 * non-trivial-for-layout, which lets clang's Itanium ABI reuse its 4-byte
+	 * trailing padding when it's inherited (by UStruct; see the multi-inheritance
+	 * branch in GenerateStruct). MSVC reuses base tail padding unconditionally, so
+	 * the dtor is a no-op there.
+	 */
+	FStructBaseChain.Functions = {
+		PredefinedFunction{
+			.CustomComment = "Non-trivial-for-layout — enables Itanium tail-padding reuse when FStructBaseChain is inherited by UStruct.",
+			.ReturnType = "", .NameWithParams = "~FStructBaseChain()", .Body = "{}",
+			.bIsStatic = false, .bIsConst = false, .bIsBodyInline = true
+		}
+	};
+
 	GenerateStruct(&FStructBaseChain, BasicHpp, BasicCpp, BasicHpp, AssertionsFile);
 
 
@@ -5345,59 +5399,38 @@ R"({
 
 	if (Settings::Internal::bUseFProperty)
 	{
-		/* class FFieldPath */
+		/*
+		 * class FFieldPath
+		 *
+		 * FFieldPath's C++ layout is not stable across UE versions or build flags:
+		 *   - UE 4.24-ish with FProperty: single TWeakObjectPtr<UField>, 8 bytes.
+		 *   - UE 4.25+ without WITH_EDITORONLY_DATA: three members (ResolvedField,
+		 *     ResolvedOwner, Path), ~32 bytes.
+		 *   - UE 4.25+ with WITH_EDITORONLY_DATA: five members, >32 bytes.
+		 * Attempting to emit the "correct" members per-version inevitably disagrees
+		 * with the reflection-reported size on *some* build. We don't need FFieldPath's
+		 * field names at the SDK consumer (there's no reflection-driven access to its
+		 * members), so emit it as an opaque alignas-padded struct sized from the actual
+		 * detected FFieldPathProperty — matches PropertyFixup.hpp's treatment of
+		 * FFieldPathProperty_, FMulticastSparseDelegateProperty_, etc.
+		 */
 		PredefinedStruct FFieldPath = PredefinedStruct{
-			.UniqueName = "FFieldPath", .Size = PropertySizes::FieldPathProperty, .Alignment = alignof(void*), .bUseExplictAlignment = false, .bIsFinal = false, .bIsClass = true, .bIsUnion = false, .Super = nullptr
+			.UniqueName = "FFieldPath",
+			.Size = PropertySizes::FieldPathProperty,
+			.Alignment = PropertySizes::FieldPathPropertyAlignment,
+			.bUseExplictAlignment = true,
+			.bIsFinal = false, .bIsClass = true, .bIsUnion = false, .Super = nullptr
 		};
 
 		FFieldPath.Properties =
 		{
 			PredefinedMember {
-				.Comment = "NOT AUTO-GENERATED PROPERTY",
-				.Type = "class FField*", .Name = "ResolvedField", .Offset = 0x0, .Size = sizeof(void*), .ArrayDim = 0x1, .Alignment = alignof(void*),
+				.Comment = "Opaque — actual FFieldPath layout is version-dependent (see CppGenerator.cpp). Sized from reflected FFieldPathProperty.",
+				.Type = "unsigned char", .Name = "Pad", .Offset = 0x0,
+				.Size = 0x1, .ArrayDim = PropertySizes::FieldPathProperty, .Alignment = 0x1,
 				.bIsStatic = false, .bIsZeroSizeMember = false, .bIsBitField = false, .BitIndex = 0xFF
 			},
 		};
-
-		/* #ifdef WITH_EDITORONLY_DATA */
-		const bool bIsWithEditorOnlyData = PropertySizes::FieldPathProperty > 0x20;
-
-		if (bIsWithEditorOnlyData)
-		{
-			FFieldPath.Properties.emplace_back
-			(
-				PredefinedMember{
-					.Comment = "NOT AUTO-GENERATED PROPERTY",
-					.Type = "class FFieldClass*", .Name = "InitialFieldClass", .Offset = sizeof(void*), .Size = sizeof(void*), .ArrayDim = 0x1, .Alignment = alignof(void*),
-					.bIsStatic = false, .bIsZeroSizeMember = false, .bIsBitField = false, .BitIndex = 0xFF
-				}
-			);
-			FFieldPath.Properties.emplace_back
-			(
-				PredefinedMember{
-					.Comment = "NOT AUTO-GENERATED PROPERTY",
-					.Type = "int32", .Name = "FieldPathSerialNumber", .Offset = sizeof(void*) * 2, .Size = sizeof(int32), .ArrayDim = 0x1, .Alignment = alignof(int32),
-					.bIsStatic = false, .bIsZeroSizeMember = false, .bIsBitField = false, .BitIndex = 0xFF
-				}
-			);
-		}
-
-		FFieldPath.Properties.push_back
-		(
-			PredefinedMember{
-				.Comment = "NOT AUTO-GENERATED PROPERTY",
-				.Type = "TWeakObjectPtr<class UStruct>", .Name = "ResolvedOwner", .Offset = (bIsWithEditorOnlyData ? (int)sizeof(void*) + (int)sizeof(void*) + (int)sizeof(int32) : (int)sizeof(void*)), .Size = 0x8, .ArrayDim = 0x1, .Alignment = alignof(void*),
-				.bIsStatic = false, .bIsZeroSizeMember = false, .bIsBitField = false, .BitIndex = 0xFF
-			}
-		);
-		FFieldPath.Properties.push_back
-		(
-			PredefinedMember{
-				.Comment = "NOT AUTO-GENERATED PROPERTY",
-				.Type = "TArray<FName>", .Name = "Path", .Offset = (bIsWithEditorOnlyData ? (int)sizeof(void*) + (int)sizeof(void*) + (int)sizeof(int32) + 0x08 : (int)sizeof(void*) * 2), .Size = sizeof(TArray<int>), .ArrayDim = 0x1, .Alignment = alignof(void*),
-				.bIsStatic = false, .bIsZeroSizeMember = false, .bIsBitField = false, .BitIndex = 0xFF
-			}
-		);
 
 		GenerateStruct(&FFieldPath, BasicHpp, BasicCpp, BasicHpp, AssertionsFile);
 

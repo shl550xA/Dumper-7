@@ -317,6 +317,14 @@ namespace PropertySizes
 	void InitTDelegateSize();
 
 	inline int32 FieldPathProperty = 0x20;
+	/* Alignment detected from the same FieldPathProperty probed for FieldPathProperty (size).
+	 * Used by the FFieldPath emission in CppGenerator to produce an opaque padded struct —
+	 * the C++ layout of FFieldPath is not stable across UE versions (single TWeakObjectPtr
+	 * in UE 4.24-ish vs. three-member struct in UE 4.25+ vs. five-member with
+	 * WITH_EDITORONLY_DATA), so emitting a reflection-sized opaque is the only version-
+	 * independent shape. Defaults to alignof(void*) == 8 because that matches the most
+	 * common observed layout; InitFFieldPathSize overwrites when it finds a real property. */
+	inline int32 FieldPathPropertyAlignment = 0x8;
 	void InitFFieldPathSize();
 
 	inline int32 MulticastInlineDelegateProperty = 0x10;

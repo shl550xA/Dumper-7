@@ -518,6 +518,7 @@ void PropertySizes::InitFFieldPathSize()
 				if (Prop.IsA(EClassCastFlags::FieldPathProperty))
 				{
 					PropertySizes::FieldPathProperty = Prop.GetSize();
+					PropertySizes::FieldPathPropertyAlignment = Prop.GetAlignment();
 					return;
 				}
 			}
@@ -535,6 +536,7 @@ void PropertySizes::InitFFieldPathSize()
 		return OnPropertyNotFound();
 
 	PropertySizes::FieldPathProperty = ValueParamProp.GetSize();
+	PropertySizes::FieldPathPropertyAlignment = ValueParamProp.GetAlignment();
 }
 
 void PropertySizes::InitTMulticastInlineDelegateSize()
