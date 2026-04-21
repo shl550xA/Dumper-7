@@ -33,6 +33,20 @@ struct StructInfo
 	/* Unaligned size of this struct */
 	int32 Size = INT_MAX;
 
+	/* First byte past everything this struct physically emits in the generated
+	 * C++ output (own members + any terminal pad). For supers whose
+	 * GenerateStruct would emit nothing — 0 own UE properties AND
+	 * StructSizeWithoutSuper < Alignment — this inherits the super's value
+	 * because the pass-through contributes no layout of its own.
+	 *
+	 * Distinct from Size: Size has been clamped to derived classes'
+	 * LowestOffset by InitSizesAndIsFinal, which makes it a fiction on pure
+	 * pass-through supers (the stored value doesn't correspond to any
+	 * physically-emitted byte). Use this when you need to know where a
+	 * super's data actually ends for derived-class layout. Set in
+	 * InitEffectiveCppEnds; -1 sentinel = not yet computed. */
+	int32 EffectiveCppEnd = -1;
+
 	/* Alignment of this struct for alignas(Alignment), might be implicit */
 	int32 Alignment = 0x1;
 
@@ -65,6 +79,7 @@ public:
 	int32 GetLastMemberEnd() const;
 	int32 GetSize() const;
 	int32 GetUnalignedSize() const;
+	int32 GetEffectiveCppEnd() const;
 	int32 GetAlignment() const;
 	bool ShouldUseExplicitAlignment() const;
 	const StringEntry& GetName() const;
@@ -99,6 +114,8 @@ private:
 private:
 	static void InitAlignmentsAndNames();
 	static void InitSizesAndIsFinal();
+	static void InitEffectiveCppEnds();
+	static int32 ComputeEffectiveCppEnd(UEStruct Struct);
 
 public:
 	static void Init();

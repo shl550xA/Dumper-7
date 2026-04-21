@@ -77,6 +77,11 @@ int32 StructWrapper::GetUnalignedSize() const
     return bIsUnrealStruct ? InfoHandle.GetUnalignedSize() : PredefStruct->Size;
 }
 
+int32 StructWrapper::GetEffectiveCppEnd() const
+{
+    return bIsUnrealStruct ? InfoHandle.GetEffectiveCppEnd() : PredefStruct->Size;
+}
+
 bool StructWrapper::ShouldUseExplicitAlignment() const
 {
     return bIsUnrealStruct ? InfoHandle.ShouldUseExplicitAlignment() : PredefStruct->bUseExplictAlignment;

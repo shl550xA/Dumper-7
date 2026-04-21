@@ -700,6 +700,7 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 	int32 UnalignedSuperSize = 0x0;
 	int32 SuperAlignment = 0x0;
 	int32 SuperLastMemberEnd = 0x0;
+	int32 SuperEffectiveCppEnd = 0x0;
 	bool bIsReusingTrailingPaddingFromSuper = false;
 
 	StructWrapper Super = Struct.GetSuper();
@@ -714,6 +715,7 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 		UnalignedSuperSize = Super.GetUnalignedSize();
 		SuperAlignment = Super.GetAlignment();
 		SuperLastMemberEnd = Super.GetLastMemberEnd();
+		SuperEffectiveCppEnd = Super.GetEffectiveCppEnd();
 
 		bIsReusingTrailingPaddingFromSuper = Super.HasReusedTrailingPadding();
 
@@ -753,6 +755,7 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 		SuperSize += FStructBaseChainDataSize;
 		UnalignedSuperSize += FStructBaseChainDataSize;
 		SuperLastMemberEnd = SuperSize;
+		SuperEffectiveCppEnd = SuperSize;
 	}
 
 	const int32 StructSizeWithoutSuper = StructSize - SuperSize;
@@ -824,70 +827,15 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 
 	if (bHasMembers)
 	{
-		int32 MemberLayoutStart;
-		if (bIsReusingTrailingPaddingFromSuper)
-		{
-			/* Member layout starts at the super's effective C++ end — i.e.
-			 * the first byte past the last thing the super actually emits.
-			 *
-			 * UnalignedSuperSize is correct when the super has own members
-			 * or emits a terminal pad (FTTTrackBase: members through 0x11
-			 * plus explicit Pad_11[0x3] -> UnalignedSize 0x14; UDFContainerBase:
-			 * 0 own members but StructSizeWithoutSuper 0x20 triggers
-			 * bHasMembers and emits Pad_16A[0x20] -> UnalignedSize 0x18A).
-			 *
-			 * But a "pure pass-through" super — no own members AND no
-			 * terminal pad emission (StructSizeWithoutSuper < Alignment, so
-			 * GenerateMembers wasn't even called for it) — contributes no
-			 * layout of its own. Its UnalignedSize has been clamped by the
-			 * derived itself (StructManager sets Size = LowestOffset) and
-			 * misrepresents where real data ends. Walk past such supers to
-			 * the first ancestor that does emit something, and use that
-			 * ancestor's UnalignedSize.
-			 *
-			 * Cases:
-			 *   URaid -> UCommonHUDView (pure pass-through, OwnSize 0)
-			 *         -> UBaseUIView (has members, UnalignedSize 0x3E9).
-			 *     MemberLayoutStart = 0x3E9 — catches the unreflected byte
-			 *     between UBaseUIView's last bool (0x3E8) and URaid's first
-			 *     own bool (reflected 0x3EA).
-			 *   UViewport -> UContentWidget (pure pass-through)
-			 *             -> UPanelWidget (has members, UnalignedSize 0x16A
-			 *                including UPanelWidget's own terminal Pad_169[0x1]).
-			 *     MemberLayoutStart = 0x16A.
-			 *   UDFInputTypeVisibilityReContainer -> UDFContainerBase
-			 *     (0 members but StructSizeWithoutSuper 0x20 >= alignment 8,
-			 *      so emits Pad_16A[0x20], UnalignedSize 0x18A).
-			 *     Walk stops at UDFContainerBase; MemberLayoutStart = 0x18A. */
-			MemberLayoutStart = UnalignedSuperSize;
-			if (Super.IsUnrealStruct() && Super.GetLastMemberEnd() == 0)
-			{
-				UEStruct Current = Super.GetUnrealStruct();
-				while (Current)
-				{
-					const StructInfoHandle CurInfo = StructManager::GetInfo(Current);
-					UEStruct ParentS = Current.GetSuper();
-					const int32 ParentAlignedSize = ParentS
-						? StructManager::GetInfo(ParentS).GetSize() : 0;
-					const int32 OwnAlignedSize = CurInfo.GetSize() - ParentAlignedSize;
-					const bool bEmitsSomething =
-						CurInfo.GetLastMemberEnd() > 0
-						|| OwnAlignedSize >= CurInfo.GetAlignment();
-					if (bEmitsSomething)
-					{
-						MemberLayoutStart = CurInfo.GetUnalignedSize();
-						break;
-					}
-					if (!ParentS)
-						break;
-					Current = ParentS;
-				}
-			}
-		}
-		else
-		{
-			MemberLayoutStart = SuperSize;
-		}
+		/* When reusing super's trailing padding, start own-member layout at
+		 * the super's effective C++ end — the first byte past everything the
+		 * super physically emits. SuperEffectiveCppEnd already walks past
+		 * pure pass-through layers whose UnalignedSize is a fiction (clamped
+		 * by derived's LowestOffset but backed by no emitted bytes). See
+		 * StructInfo::EffectiveCppEnd for the full rationale. */
+		const int32 MemberLayoutStart = bIsReusingTrailingPaddingFromSuper
+			? SuperEffectiveCppEnd
+			: SuperSize;
 		StructFile << GenerateMembers(Struct, Members, MemberLayoutStart, SuperLastMemberEnd, SuperAlignment, PackageIndex);
 
 		if (bHasFunctions)

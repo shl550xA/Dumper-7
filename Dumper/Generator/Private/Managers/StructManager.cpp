@@ -23,6 +23,11 @@ int32 StructInfoHandle::GetUnalignedSize() const
 	return Info->Size;
 }
 
+int32 StructInfoHandle::GetEffectiveCppEnd() const
+{
+	return Info->EffectiveCppEnd;
+}
+
 int32 StructInfoHandle::GetAlignment() const
 {
 	return Info->Alignment;
@@ -246,6 +251,57 @@ void StructManager::InitSizesAndIsFinal()
 	}
 }
 
+int32 StructManager::ComputeEffectiveCppEnd(UEStruct Struct)
+{
+	StructInfo& Info = StructInfoOverrides.at(Struct.GetIndex());
+	if (Info.EffectiveCppEnd != -1)
+		return Info.EffectiveCppEnd;
+
+	const UEStruct Super = Struct.GetSuper();
+	const int32 SuperAlignedSize = [&]() -> int32 {
+		if (!Super)
+			return 0;
+		auto It = StructInfoOverrides.find(Super.GetIndex());
+		if (It == StructInfoOverrides.end())
+			return 0;
+		return Align(It->second.Size, It->second.Alignment);
+	}();
+	const int32 AlignedSize = Align(Info.Size, Info.Alignment);
+	const int32 StructSizeWithoutSuper = AlignedSize - SuperAlignedSize;
+
+	/* A struct emits something in CppGenerator iff it has own UE properties
+	 * OR bHasMembers fires on the 'StructSizeWithoutSuper >= Alignment' branch
+	 * (which triggers GenerateMembers, which in turn emits a terminal pad for
+	 * whatever gap remains). In both cases its UnalignedSize is the physical
+	 * end of emitted bytes. Otherwise it's a pure pass-through and its
+	 * layout is inherited from the super. */
+	int32 Result;
+	if (Info.LastMemberEnd > 0 || StructSizeWithoutSuper >= Info.Alignment)
+	{
+		Result = Info.Size;
+	}
+	else if (Super)
+	{
+		Result = ComputeEffectiveCppEnd(Super);
+	}
+	else
+	{
+		Result = Info.Size;
+	}
+
+	Info.EffectiveCppEnd = Result;
+	return Result;
+}
+
+void StructManager::InitEffectiveCppEnds()
+{
+	for (auto& [Index, Info] : StructInfoOverrides)
+	{
+		if (Info.EffectiveCppEnd == -1)
+			ComputeEffectiveCppEnd(ObjectArray::GetByIndex<UEStruct>(Index));
+	}
+}
+
 void StructManager::Init()
 {
 	if (bIsInitialized)
@@ -257,6 +313,7 @@ void StructManager::Init()
 
 	InitAlignmentsAndNames();
 	InitSizesAndIsFinal();
+	InitEffectiveCppEnds();
 
 	/* 
 	* The default class-alignment of 0x8 is only set for classes with a valid Super-class, because they inherit from UObject. 
