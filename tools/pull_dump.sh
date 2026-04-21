@@ -49,10 +49,19 @@ adb shell "su -c 'rm -f \"${STAGE}\"'"
 
 # Wipe only the top-level entries the tarball is about to create, so
 # non-output files under SDKTest/ (CMakeLists.txt, shim/, build/, etc.)
-# stay put across runs.
+# stay put across runs. Tar entries are emitted as "./X/..." (because we
+# archived "." above), so strip the leading "./" before picking the first
+# path component. The previous "-F/" split made $1=="." for every entry
+# and silently skipped the wipe — leaving stale files from pulls of a
+# different package.
 echo "[*] Extracting into ${DEST_DIR}"
-mapfile -t TOP_LEVEL < <(tar -tzf "${LOCAL_TARBALL}" | awk -F/ '$1!="" && $1!="."{print $1}' | sort -u)
+mapfile -t TOP_LEVEL < <(
+    tar -tzf "${LOCAL_TARBALL}" \
+        | sed -n 's@^\(\./\)\{0,1\}\([^/]\+\)\(/.*\)\{0,1\}$@\2@p' \
+        | sort -u
+)
 for item in "${TOP_LEVEL[@]}"; do
+    [[ -z "${item}" || "${item}" == "." ]] && continue
     rm -rf "${DEST_DIR:?}/${item}"
 done
 tar -xzf "${LOCAL_TARBALL}" -C "${DEST_DIR}"
