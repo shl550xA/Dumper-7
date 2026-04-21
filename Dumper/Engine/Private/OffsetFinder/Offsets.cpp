@@ -320,29 +320,32 @@ void Off::Init()
 		Off::UStruct::ChildProperties = OffsetFinder::FindChildPropertiesOffset();
 		std::cerr << std::format("Off::UStruct::ChildProperties: 0x{:X}\n", Off::UStruct::ChildProperties);
 
-		OffsetFinder::FixupHardcodedOffsets(); // must be called after FindChildPropertiesOffset 
+		const int32 DetectedOwner = OffsetFinder::FindFFieldOwnerOffset();
+		if (DetectedOwner != OffsetFinder::OffsetNotFound)
+			Off::FField::Owner = DetectedOwner;
+		std::cerr << std::format("Off::FField::Owner: 0x{:X}{}\n", Off::FField::Owner,
+			DetectedOwner == OffsetFinder::OffsetNotFound ? " (default — detection failed)" : "");
 
 		Off::FField::Next = OffsetFinder::FindFFieldNextOffset();
 		std::cerr << std::format("Off::FField::Next: 0x{:X}\n", Off::FField::Next);
 
+		OffsetFinder::FixupHardcodedOffsets(); // uses Owner + Next to derive FFieldVariant size
+
 		Off::FField::Class = OffsetFinder::FindFFieldClassOffset();
 		std::cerr << std::format("Off::FField::Class: 0x{:X}\n", Off::FField::Class);
 
-		// Comment out this line if you're crashing here and see if the NewFindFFieldNameOffset might work!
-		Off::FField::Name = OffsetFinder::FindFFieldNameOffset();
-		//Off::FField::Name = OffsetFinder::NewFindFFieldNameOffset();
-
+		Off::FField::Name = OffsetFinder::NewFindFFieldNameOffset();
 		if (Off::FField::Name == OffsetFinder::OffsetNotFound)
-			Off::FField::Name = OffsetFinder::NewFindFFieldNameOffset();
-
+		{
+			std::cerr << "NewFindFFieldNameOffset failed, falling back to FindFFieldNameOffset\n";
+			Off::FField::Name = OffsetFinder::FindFFieldNameOffset();
+		}
 		std::cerr << std::format("Off::FField::Name: 0x{:X}\n", Off::FField::Name);
 
-		/*
-		* FNameSize might be wrong at this point of execution.
-		* FField::Flags is not critical so a fix is only applied later in OffsetFinder::PostInitFNameSettings().
-		*/
+		/* Flags is Name + FNameSize, but FNameSize may still be wrong here — PostInitFNameSettings()
+		 * below will fix FNameSize, and then we (re)compute Flags. */
 		Off::FField::Flags = Off::FField::Name + Off::InSDK::Name::FNameSize;
-		std::cerr << std::format("Off::FField::Flags: 0x{:X}\n", Off::FField::Flags);
+		std::cerr << std::format("Off::FField::Flags: 0x{:X} (tentative)\n", Off::FField::Flags);
 
 		Off::FField::EditorOnlyMetadata = OffsetFinder::FindFFieldEditorOnlyMetaDataOffset();
 		if (Off::FField::EditorOnlyMetadata != OffsetFinder::OffsetNotFound)
@@ -434,6 +437,19 @@ void Off::Init()
 	std::cerr << std::format("Off::InSDK::UDataTable::RowMap: 0x{:X}\n", Off::InSDK::UDataTable::RowMap) << std::endl;
 
 	OffsetFinder::PostInitFNameSettings();
+
+	/* PostInitFNameSettings() fixes FNameSize if InitFNameSettings() guessed wrong. Re-derive Flags
+	 * here using the now-authoritative FNameSize so Flags is correct end-to-end. */
+	if (Settings::Internal::bUseFProperty)
+	{
+		const int32 FinalFlags = Off::FField::Name + Off::InSDK::Name::FNameSize;
+		if (FinalFlags != Off::FField::Flags)
+		{
+			std::cerr << std::format("Off::FField::Flags: corrected 0x{:X} -> 0x{:X} after FNameSize settled\n",
+				Off::FField::Flags, FinalFlags);
+			Off::FField::Flags = FinalFlags;
+		}
+	}
 
 	std::cerr << std::endl;
 

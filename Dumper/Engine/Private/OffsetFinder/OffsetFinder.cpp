@@ -247,7 +247,7 @@ void OffsetFinder::FixupHardcodedOffsets()
 {
 	if (Settings::Internal::bUseCasePreservingName)
 	{
-		Off::FField::Flags += 0x8;
+		/* FField::Flags is computed post-detection from Name + FNameSize, so no longer patched here. */
 
 		Off::FFieldClass::Id += 0x08;
 		Off::FFieldClass::CastFlags += 0x08;
@@ -258,33 +258,29 @@ void OffsetFinder::FixupHardcodedOffsets()
 	if (Settings::Internal::bUseFProperty)
 	{
 		/*
-		* On versions below 5.1.1: class FFieldVariant { void*, bool } -> extends to { void*, bool, uint8[0x7] }
-		* ON versions since 5.1.1: class FFieldVariant { void* }
+		* FFieldVariant size is simply (Next - Owner):
+		*   - 8  => new variant (since UE 5.1.1): class FFieldVariant { void* }
+		*   - 16 => old variant: class FFieldVariant { void*, bool } (extended to 16 by alignment)
 		*
-		* Check:
-		* if FFieldVariant contains a bool, the memory at the bools offset will not be a valid pointer
-		* if FFieldVariant doesn't contain a bool, the memory at the bools offset will be the next member of FField, the Next ptr [valid]
+		* Both Owner and Next are detected per-member upstream, so this holds for any member order.
+		* The old pointer-at-Owner+0x8 check was ambiguous for games with reordered FField layouts
+		* (e.g., ones where Class is placed after Next).
 		*/
-
-		const int32 OffsetToCheck = Off::FField::Owner + 0x8;
-		void* PossibleNextPtrOrBool0 = *(void**)((uint8*)ObjectArray::FindClassFast("Actor").GetChildProperties().GetAddress() + OffsetToCheck);
-		void* PossibleNextPtrOrBool1 = *(void**)((uint8*)ObjectArray::FindClassFast("ActorComponent").GetChildProperties().GetAddress() + OffsetToCheck);
-		void* PossibleNextPtrOrBool2 = *(void**)((uint8*)ObjectArray::FindClassFast("Pawn").GetChildProperties().GetAddress() + OffsetToCheck);
-
-		auto IsValidPtr = [](void* a) -> bool
+		const int32 VariantSize = Off::FField::Next - Off::FField::Owner;
+		if (VariantSize == 0x08)
 		{
-			return !Platform::IsBadReadPtr(a) && (uintptr_t(a) & 0x1) == 0; // realistically, there wont be any pointers to unaligned memory
-		};
-
-		if (IsValidPtr(PossibleNextPtrOrBool0) && IsValidPtr(PossibleNextPtrOrBool1) && IsValidPtr(PossibleNextPtrOrBool2))
-		{
-			std::cerr << "Applaying fix to hardcoded offsets \n" << std::endl;
-
 			Settings::Internal::bUseMaskForFieldOwner = true;
-
-			Off::FField::Next -= 0x08;
-			Off::FField::Name -= 0x08;
-			Off::FField::Flags -= 0x08;
+			std::cerr << "Detected 8-byte FFieldVariant (UE >= 5.1.1)\n";
+		}
+		else if (VariantSize == 0x10)
+		{
+			Settings::Internal::bUseMaskForFieldOwner = false;
+			std::cerr << "Detected 16-byte FFieldVariant (UE < 5.1.1)\n";
+		}
+		else
+		{
+			std::cerr << std::format("Warning: unexpected FFieldVariant size {:#x} (Next=0x{:X}, Owner=0x{:X})\n",
+				VariantSize, Off::FField::Next, Off::FField::Owner);
 		}
 	}
 }
@@ -351,6 +347,11 @@ void OffsetFinder::InitFNameSettings()
 
 		Off::InSDK::Name::FNameSize = 0xC;
 	}
+	else if (FNameSize == 0x8) /* Regular inline-number FName — trust the UObject gap over the Number-distribution heuristic */
+	{
+		Off::FName::Number = 0x4;
+		Off::InSDK::Name::FNameSize = 0x8;
+	}
 	else if (GetNumNamesWithNumberOneToFour() < FNameNumberThreashold) /* FNAME_OUTLINE_NUMBER */
 	{
 		Settings::Internal::bUseOutlineNumberName = true;
@@ -369,9 +370,53 @@ void OffsetFinder::InitFNameSettings()
 
 void OffsetFinder::PostInitFNameSettings()
 {
-	const UEClass PlayerStart = ObjectArray::FindClassFast("PlayerStart");
+	/* First, try the historical PlayerStart.PlayerStartTag path — fastest when available. */
+	int32 FNameSize = OffsetNotFound;
+	UEObject Referent; /* The object whose FName we'll later probe for case-preserving/outline flags. */
 
-	const int32 FNameSize = PlayerStart.FindMember("PlayerStartTag").GetSize();
+	const UEClass PlayerStart = ObjectArray::FindClassFast("PlayerStart");
+	if (PlayerStart)
+	{
+		const UEProperty PlayerStartTag = PlayerStart.FindMember("PlayerStartTag");
+		if (PlayerStartTag)
+		{
+			FNameSize = PlayerStartTag.GetSize();
+			Referent = PlayerStart;
+		}
+	}
+
+	/* Fall back to scanning GObjects for any FNameProperty. Common in games that don't ship PlayerStart
+	 * (many mobile / UE5 titles). We stop at the first hit so this is bounded. */
+	if (FNameSize == OffsetNotFound)
+	{
+		for (UEObject Obj : ObjectArray())
+		{
+			if (!Obj.IsA(EClassCastFlags::Struct))
+				continue;
+
+			for (UEProperty Prop : Obj.Cast<UEStruct>().GetProperties())
+			{
+				if (Prop.IsA(EClassCastFlags::NameProperty))
+				{
+					FNameSize = Prop.GetSize();
+					Referent = Obj;
+					break;
+				}
+			}
+			if (FNameSize != OffsetNotFound)
+				break;
+		}
+	}
+
+	if (FNameSize == OffsetNotFound)
+	{
+		std::cerr << "PostInitFNameSettings: could not locate any FNameProperty to probe FName size; keeping existing FNameSize = 0x"
+			<< std::hex << Off::InSDK::Name::FNameSize << std::dec << "\n";
+		return;
+	}
+
+	std::cerr << std::format("PostInitFNameSettings: probed FName size = 0x{:X} (current = 0x{:X})\n",
+		FNameSize, Off::InSDK::Name::FNameSize);
 
 	/* Nothing to do for us, everything is fine! */
 	if (Off::InSDK::Name::FNameSize == FNameSize)
@@ -380,7 +425,7 @@ void OffsetFinder::PostInitFNameSettings()
 	/* We've used the wrong FNameSize to determine the offset of FField::Flags. Substract the old, wrong, size and add the new one.*/
 	Off::FField::Flags = (Off::FField::Flags - Off::InSDK::Name::FNameSize) + FNameSize;
 
-	const uint8* NameAddress = static_cast<const uint8*>(PlayerStart.GetFName().GetAddress());
+	const uint8* NameAddress = static_cast<const uint8*>(Referent.GetFName().GetAddress());
 
 	const int32 FNameFirstInt /* ComparisonIndex */ = *reinterpret_cast<const int32*>(NameAddress);
 	const int32 FNameSecondInt /* [Number/DisplayIndex] */ = *reinterpret_cast<const int32*>(NameAddress + 0x4);
@@ -435,6 +480,38 @@ int32_t OffsetFinder::FindUFieldNextOffset()
 }
 
 /* FField */
+int32_t OffsetFinder::FindFFieldOwnerOffset()
+{
+	/*
+	* Owner of a struct's first child FProperty is the struct itself (a UStruct*), unless it's been moved
+	* under a UFunction or similar. For Guid/Vector, the first child is owned directly by the struct, so
+	* the Owner slot of the child points to the struct. We scan every 8-byte-aligned offset for the first
+	* one where both Guid's child and Vector's child point back to their own struct — that's unambiguous
+	* across all known FField layouts (both old 16-byte and new 8-byte FFieldVariant, regardless of member
+	* order).
+	*/
+	const UEStruct GuidStruct = ObjectArray::FindStructFast("Guid");
+	const UEStruct VectorStruct = ObjectArray::FindStructFast("Vector");
+	const void* GuidStructAddr = GuidStruct.GetAddress();
+	const void* VectorStructAddr = VectorStruct.GetAddress();
+	const uint8_t* GuidChild = static_cast<const uint8_t*>(GuidStruct.GetChildProperties().GetAddress());
+	const uint8_t* VectorChild = static_cast<const uint8_t*>(VectorStruct.GetChildProperties().GetAddress());
+
+	if (Platform::IsBadReadPtr(GuidChild) || Platform::IsBadReadPtr(VectorChild))
+		return OffsetNotFound;
+
+	for (int32 Offset = sizeof(void*); Offset <= 0x30; Offset += sizeof(void*))
+	{
+		const void* OwnerInGuid = *reinterpret_cast<const void* const*>(GuidChild + Offset);
+		const void* OwnerInVector = *reinterpret_cast<const void* const*>(VectorChild + Offset);
+
+		if (OwnerInGuid == GuidStructAddr && OwnerInVector == VectorStructAddr)
+			return Offset;
+	}
+
+	return OffsetNotFound;
+}
+
 int32_t OffsetFinder::FindFFieldNextOffset()
 {
 	const void* GuidChildren = ObjectArray::FindStructFast("Guid").GetChildProperties().GetAddress();
@@ -471,9 +548,27 @@ int32_t OffsetFinder::NewFindFFieldNameOffset()
 	auto IsPotentiallyValidOffset = [](int32 Offset) -> bool
 	{
 		// Make sure 0x4 aligned Offsets are neither the start, nor the middle of a pointer-member. Irrelevant for 32-bit, because the 2nd check will be 0x2 aligned then.
-		return Offset != Off::FField::Class && Offset != (Off::FField::Class + (sizeof(void*) / 2))
-			&& Offset != Off::FField::Next && Offset != (Off::FField::Next + (sizeof(void*) / 2))
-			&& Offset != Off::FField::Vft && Offset != (Off::FField::Vft + (sizeof(void*) / 2));
+		const int32 HalfPtr = static_cast<int32>(sizeof(void*) / 2);
+
+		if (Offset == Off::FField::Class || Offset == Off::FField::Class + HalfPtr)
+			return false;
+		if (Offset == Off::FField::Next || Offset == Off::FField::Next + HalfPtr)
+			return false;
+		if (Offset == Off::FField::Vft || Offset == Off::FField::Vft + HalfPtr)
+			return false;
+
+		/* Also exclude the Owner slot (and its upper half). Owner is a FFieldVariant — 8 or 16 bytes
+		 * starting at Off::FField::Owner. Any 4-byte-aligned offset that falls inside it should not
+		 * be considered a valid Name candidate. */
+		if (Off::FField::Owner != OffsetNotFound)
+		{
+			const int32 OwnerStart = Off::FField::Owner;
+			const int32 OwnerEnd = OwnerStart + (Settings::Internal::bUseMaskForFieldOwner ? 0x8 : 0x10);
+			if (Offset >= OwnerStart && Offset < OwnerEnd)
+				return false;
+		}
+
+		return true;
 	};
 
 	AllFieldIterator TmpIt;

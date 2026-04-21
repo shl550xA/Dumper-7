@@ -89,6 +89,7 @@ namespace OffsetFinder
 	int32_t FindUFieldNextOffset();
 
 	/* FField */
+	int32_t FindFFieldOwnerOffset();
 	int32_t FindFFieldNextOffset();
 	int32_t FindFFieldNameOffset();
 	int32_t NewFindFFieldNameOffset();
