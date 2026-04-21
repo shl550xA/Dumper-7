@@ -146,15 +146,18 @@ std::string CppGenerator::GenerateMembers(const StructWrapper& Struct, const Mem
 #ifndef _WIN32
 			// When the first derived member is padding, annotate it with
 			// alignas(alignof(Super)) so Itanium doesn't slot it into the base's
-			// tail padding. The three conditions (first member, offset and
-			// size both super-aligned) guarantee this is layout-neutral on
-			// MSVC.
+			// tail padding. The current position must already be super-aligned
+			// (it always is, because the reflected super size is its aligned
+			// size); the padding's own size doesn't need to be super-aligned,
+			// because alignas only moves the *start* of the member, and the
+			// reflected offset of the next member accounts for whatever size we
+			// pick here. MSVC ignores the alignas (the offset would be
+			// super-aligned anyway because reflection reports aligned offsets).
 			const int32 LeadPadSize = MemberOffset - PrevPropertyEnd;
 			const bool bApplyLeadingAlignas =
 				!bEmittedAny
 				&& SuperAlign > 1
-				&& (PrevPropertyEnd % SuperAlign) == 0
-				&& (LeadPadSize % SuperAlign) == 0;
+				&& (PrevPropertyEnd % SuperAlign) == 0;
 			const int32 LeadAlignas = bApplyLeadingAlignas ? SuperAlign : 0;
 			OutMembers += GenerateBytePadding(PrevPropertyEnd, LeadPadSize, "Fixing Size After Last Property [ Dumper-7 ]", LeadAlignas);
 #else
@@ -227,7 +230,15 @@ std::string CppGenerator::GenerateMembers(const StructWrapper& Struct, const Mem
 
 	const int32 MissingByteCount = Struct.GetUnalignedSize() - PrevPropertyEnd;
 
-	if (MissingByteCount > 0x0 /* >=Struct.GetAlignment()*/)
+	/* Don't materialize the tail padding if it would turn a struct that has no
+	 * data members into one that does — C++ auto-sizes an empty class to 1 byte
+	 * anyway, and emitting an explicit Pad_0 byte prevents EBO when the struct
+	 * is used as a base (derived's first member is then pushed past that byte
+	 * + its alignment, which disagrees with UE's reflected offsets that *do*
+	 * assume EBO). Seen on DFM with FSMTextDisplayWidgetInfo (1-byte reflected
+	 * size, no own members, breaks FSMTextNodeWidgetInfo offsets). */
+	const bool bWouldBreakEbo = !bEmittedAny && Struct.GetUnalignedSize() <= 0x1;
+	if (MissingByteCount > 0x0 && !bWouldBreakEbo)
 		OutMembers += GenerateBytePadding(PrevPropertyEnd, MissingByteCount, "Fixing Struct Size After Last Property [ Dumper-7 ]");
 
 	return OutMembers;
