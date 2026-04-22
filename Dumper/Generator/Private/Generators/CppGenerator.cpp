@@ -876,7 +876,7 @@ void CppGenerator::GenerateEnum(const EnumWrapper& Enum, StreamType& StructFile)
 	for (const EnumCollisionInfo& Info : EnumValueIterator)
 	{
 		NumValues++;
-		MemberString += std::format("\t{:{}} = {},\n", Info.GetUniqueName(), 40, Info.GetValue() & ValueMask);
+		MemberString += std::format("\t{:{}} = {}u,\n", Info.GetUniqueName(), 40, Info.GetValue() & ValueMask);
 	}
 
 	if (!MemberString.empty()) [[likely]]
