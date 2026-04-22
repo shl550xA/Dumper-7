@@ -1341,13 +1341,13 @@ std::unordered_map<std::string, UEProperty> CppGenerator::GetUnknownProperties()
 
 void CppGenerator::GeneratePropertyFixupFile(StreamType& PropertyFixup)
 {
-	WriteFileHead(PropertyFixup, nullptr, EFileType::PropertyFixup, "PROPERTY-FIXUP");
+	WriteFileHead(PropertyFixup, nullptr, EFileType::PropertyFixup, "PROPERTY-FIXUP", "#include <cstdint>");
 
 	std::unordered_map<std::string, UEProperty> UnknownProperties = GetUnknownProperties();
 
 	for (const auto& [Name, Property] : UnknownProperties)
 	{
-		PropertyFixup << std::format("\nclass alignas(0x{:02X}) {}\n{{\n\tunsigned __int8 Pad[0x{:X}];\n}};\n",Property.GetAlignment(), Name, Property.GetSize());
+		PropertyFixup << std::format("\nclass alignas(0x{:02X}) {}\n{{\n\tuint8_t Pad[0x{:X}];\n}};\n",Property.GetAlignment(), Name, Property.GetSize());
 	}
 
 	WriteFileEnd(PropertyFixup, EFileType::PropertyFixup);
@@ -2065,7 +2065,7 @@ void CppGenerator::InitPredefinedMembers()
 	{
 		PredefinedMember {
 			.Comment = "NOT AUTO-GENERATED PROPERTY",
-			.Type = "enum class EClassCastFlags", .Name = "CastFlags", .Offset = Off::UClass::CastFlags, .Size = sizeof(EClassCastFlags), .ArrayDim = 0x1, .Alignment = alignof(EClassCastFlags),
+			.Type = "EClassCastFlags", .Name = "CastFlags", .Offset = Off::UClass::CastFlags, .Size = sizeof(EClassCastFlags), .ArrayDim = 0x1, .Alignment = alignof(EClassCastFlags),
 			.bIsStatic = false, .bIsZeroSizeMember = false, .bIsBitField = false, .BitIndex = 0xFF
 		},
 	};

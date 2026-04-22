@@ -20,7 +20,13 @@ constexpr inline std::array FFixedUObjectArrayLayouts =
 		.ObjectsOffset = 0x0,								// 0x00
 		.MaxObjectsOffset = sizeof(void*),					// 0x08 (64bit) OR 0x04 (32bit)
 		.NumObjectsOffset = sizeof(void*) + sizeof(int)		// 0x0C (64bit) OR 0x08 (32bit)
-	}
+	},
+	FFixedUObjectArrayLayout // PUBGM CN
+	{
+		.ObjectsOffset = 0x0,
+		.MaxObjectsOffset = 0x34,
+		.NumObjectsOffset = 0x38
+	},
 };
 
 constexpr inline std::array FChunkedFixedUObjectArrayLayouts =
