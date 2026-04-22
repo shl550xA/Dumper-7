@@ -3,13 +3,25 @@
 
 SDK Generator for all Unreal Engine games. Supported versions are all of UE4 and UE5.
 
-Windows is the primary supported host. **Android ARM64 is also supported**
-and has been verified end-to-end on UE 4.18 (PUBG Mobile /
-`com.tencent.ig`) — the dumper builds as `libDumper-7.so`, injects into
-the game, and produces a full C++ SDK whose ~800 translation units
-compile cleanly on clang with `SDK_SKIP_STATIC_ASSERTS=OFF` (every
-generated `static_assert` on struct size / alignment / member offset
-passes).
+Windows is the primary supported host. **Android ARM64 is also supported**:
+the dumper builds as `libDumper-7.so`, injects into the game, and
+produces a full C++ SDK that compiles on clang with
+`SDK_SKIP_STATIC_ASSERTS=OFF` (every generated `static_assert` on struct
+size / alignment / member offset passes).
+
+### Tested games (Android ARM64)
+
+| Package | UE | Dump | SDK compiles |
+|---|---|---|---|
+| `com.tencent.ig` (PUBG Mobile) | 4.18 | ok | ok |
+| `com.tencent.tmgp.pubgmhd` (PUBGM CN) | 4.18 | ok | ok |
+| `com.proxima.dfm` | 4.24 | ok | ok |
+| `com.proximabeta.mf.uamo` | 4.26 | ok | fails — one intra-package enum name collision + one struct with an apparent game-side reflection bug (declared size disagrees with declared member size) |
+
+All tested builds required per-game offset overrides in
+[Generator::InitEngineCore()](Dumper/Generator/Private/Generators/Generator.cpp)
+(see [Overriding Offsets](#overriding-offsets)); auto-discovery of
+`FName::AppendString` / `ProcessEvent` on ARM64 is not yet implemented.
 
 ## How to use
 
@@ -27,9 +39,10 @@ passes).
 
 ### Android ARM64
 
-Verified on UE 4.18 / PUBG Mobile. Requires a rooted device and an
-injection tool such as
-[AndKittyInjector](https://github.com/MJx0/AndKittyInjector).
+Requires a rooted device and an injection tool such as
+[AndKittyInjector](https://github.com/MJx0/AndKittyInjector). See the
+[tested games](#tested-games-android-arm64) table above for
+known-good packages.
 
 1. Override the game-specific offsets in
    [Generator::InitEngineCore()](Dumper/Generator/Private/Generators/Generator.cpp) —
@@ -62,8 +75,8 @@ injection tool such as
 5. Watch progress: `adb logcat -s Dumper-7`.
 6. The SDK is written under `/data/data/<package>/Dumper-7/`.
    Pull it to the host with the helper script
-   [tools/pull_dump.sh](tools/pull_dump.sh) (default package:
-   `com.tencent.ig`).
+   [tools/pull_dump.sh](tools/pull_dump.sh) — pass the package as the
+   first argument (e.g. `tools/pull_dump.sh com.tencent.tmgp.pubgmhd`).
 
 - **See [UsingTheSDK](UsingTheSDK.md) for a guide to get started, or to migrate from an old SDK.**
 ## Support Me

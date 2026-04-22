@@ -20,7 +20,16 @@ There is no test suite. Validation is done by injecting the resulting DLL/SO int
 
 The `android-arm64-{debug,release,prod}` presets in [CMakePresets.json](CMakePresets.json) build `libDumper-7.so` for `arm64-v8a` against NDK API level 28. Requires `ANDROID_NDK_ROOT`, `ANDROID_NDK_VERSION`, `ANDROID_SDK_ROOT`, and `ANDROID_CMAKE_VERSION` in the environment.
 
-**Verified target**: UE 4.18 / PUBG Mobile (`com.tencent.ig`). With the per-game manual offset overrides in `Generator::InitEngineCore()`, the dumper produces a full C++ SDK whose 800+ generated translation units compile cleanly on clang Itanium (NDK r29) — every emitted `static_assert` on struct size / alignment / member offset passes.
+**Tested games** (each with per-game manual offset overrides in `Generator::InitEngineCore()`):
+
+| Package | UE | Dump | SDK compiles (clang Itanium, NDK r29) |
+|---|---|---|---|
+| `com.tencent.ig` (PUBG Mobile) | 4.18 | ok | ok |
+| `com.tencent.tmgp.pubgmhd` (PUBGM CN) | 4.18 | ok | ok |
+| `com.proxima.dfm` | 4.24 | ok | ok |
+| `com.proximabeta.mf.uamo` | 4.26 | ok | fails (one intra-package enum name collision + one struct where UE reflection itself disagrees on the size — likely a game-side reflection bug) |
+
+On the passing targets, every emitted `static_assert` on struct size / alignment / member offset passes.
 
 The platform layer is functional: module enumeration (`dl_iterate_phdr`), address validity (`/proc/self/maps` parsing + `PROCMAP_QUERY` fast path on kernel 6.11+), segment iteration, pattern scanning, and vtable walking all work.
 
@@ -63,6 +72,25 @@ Whether the target engine uses `UProperty` (UE ≤4.24-ish) or `FProperty` (UE 4
 UE4/UE5 uses UTF-16 internally for `TCHAR`/`FString` on all platforms. On Windows `wchar_t` is 16-bit and matches directly; on Android `wchar_t` is 32-bit, so the dumper-side `TCHAR` typedef is aliased to `char16_t`. See [Enums.h](Dumper/Engine/Public/Unreal/Enums.h) for the typedef and `TCHARToWString`/`TCHARLen`/`TCHARCmp` helpers. `FString` (dumper-side, in [UnrealContainers.h](Dumper/Engine/Public/Unreal/UnrealContainers.h)) extends `TArray<TCHAR>`, not `TArray<wchar_t>`.
 
 The *emitted* SDK has its own abstraction: `DUMPER7_TCHAR` + `DUMPER7_TEXT(x)` (prefixed to avoid collision with Windows' `<tchar.h>`). The emitter defines them in the generated `UnrealContainers.hpp` so a single generated SDK compiles on both MSVC and clang Itanium without runtime narrowing. See [CppGenerator.cpp:GenerateUnrealContainers](Dumper/Generator/Private/Generators/CppGenerator.cpp).
+
+### Key invariant: Itanium tail padding and `EffectiveCppEnd`
+
+`StructManager::InitSizesAndIsFinal` already clamps a parent's `Size` down to its child's `LowestOffset` when a derived class reuses the parent's trailing padding (sets `bHasReusedTrailingPadding`). But `Size` alone isn't enough to drive layout on Clang/Itanium: an empty pass-through class (`class B : public A {};`) passes `A`'s dsize through to `B`'s children even though `B`'s own reflected size equals `A`'s aligned size.
+
+[`StructInfo::EffectiveCppEnd`](Dumper/Generator/Private/Managers/StructManager.cpp) is the authoritative answer to "at what byte does this struct's C++ layout actually end?". Computed bottom-up, memoized:
+
+- If the struct has own UE properties, OR its `StructSizeWithoutSuper >= Alignment` (i.e. `GenerateMembers` will emit at least a terminal pad): `EffectiveCppEnd = Info.Size` (clamped).
+- Otherwise (pure pass-through, `GenerateStruct` skips it): `EffectiveCppEnd = Super.EffectiveCppEnd`.
+
+`CppGenerator::GenerateMembers` starts derived-member layout at `SuperEffectiveCppEnd` unconditionally — the reflected UE offsets of own members then naturally produce a leading `Pad_XXXX` when the derived class's `LowestOffset` is higher than the super's effective end. This handles MSVC tail-padding reuse, Clang Itanium reuse via the empty-dtor trick (see below), and pass-through empty intermediate bases uniformly.
+
+### Key invariant: `UStruct` as multi-inheritance with `FStructBaseChain`
+
+When the target engine reports `Off::UStruct::StructBaseChain != -1` (UE ≥ 4.22), the generator emits `UStruct` as `class UStruct : public UField, private FStructBaseChain` — not with `FStructBaseChain` as a member at that offset. The distinction matters because `UStruct::Size` lives in `FStructBaseChain`'s trailing padding (0x3C). That reuse is legal for a base class (MSVC always; Clang Itanium when the base is non-trivial-for-layout — achieved by giving `FStructBaseChain` a user-provided empty destructor via an inline `PredefinedFunction`) but never for a member, since a member's trailing padding is part of its sizeof. See [CppGenerator.cpp](Dumper/Generator/Private/Generators/CppGenerator.cpp) `bUStructNeedsBaseChainInheritance`.
+
+### Key invariant: Generated SDK must parse on both MSVC and Clang
+
+Anything the generator writes to the SDK has to be portable C++ — no `__int8`, no `enum class X y` elaborated specifiers, no unsuffixed 64-bit literals (they resolve as `unsigned long long` under Clang and trip `-Wimplicitly-unsigned-literal`). The two PropertyFixup stand-in classes emit `uint8_t` (with `#include <cstdint>` pulled in via the `WriteFileHead` extra-include hook), enum members are emitted in hex, and predefined member types that reference UE enums use the bare enum name rather than `enum class Name`. See [CppGenerator.cpp:GeneratePropertyFixupFile, GenerateEnum](Dumper/Generator/Private/Generators/CppGenerator.cpp).
 
 ## Modifying for a specific game
 
