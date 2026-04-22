@@ -87,14 +87,10 @@ private:
     static std::string MakeMemberString(const std::string& Type, const std::string& Name, std::string&& Comment);
     static std::string MakeMemberStringWithoutName(const std::string& Type);
 
-    static std::string GenerateBytePadding(const int32 Offset, const int32 PadSize, std::string&& Reason
-#ifndef _WIN32
-        , int32 Alignas = 0
-#endif
-    );
+    static std::string GenerateBytePadding(const int32 Offset, const int32 PadSize, std::string&& Reason);
     static std::string GenerateBitPadding(uint8 UnderlayingSizeBytes, const uint8 PrevBitPropertyEndBit, const int32 Offset, const int32 PadSize, std::string&& Reason);
 
-    static std::string GenerateMembers(const StructWrapper& Struct, const MemberManager& Members, int32 SuperSize, int32 SuperLastMemberEnd, int32 SuperAlign, int32 PackageIndex = -1);
+    static std::string GenerateMembers(const StructWrapper& Struct, const MemberManager& Members, int32 SuperSize, int32 SuperLastMemberEnd, int32 PackageIndex = -1);
     static FunctionInfo GenerateFunctionInfo(const FunctionWrapper& Func);
 
     // return: In-header function declarations and inline functions

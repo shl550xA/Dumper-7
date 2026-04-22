@@ -52,21 +52,9 @@ std::string CppGenerator::MakeMemberStringWithoutName(const std::string& Type)
 	return '\t' + Type + ";\n";
 }
 
-std::string CppGenerator::GenerateBytePadding(const int32 Offset, const int32 PadSize, std::string&& Reason
-#ifndef _WIN32
-    , int32 Alignas
-#endif
-)
+std::string CppGenerator::GenerateBytePadding(const int32 Offset, const int32 PadSize, std::string&& Reason)
 {
-	std::string Type = "uint8";
-#ifndef _WIN32
-	// On Itanium ABI, a derived struct's leading padding member may need
-	// alignas(alignof(Super)) to land at the MSVC-computed offset instead of
-	// slotting into the base's tail padding.
-	if (Alignas > 0)
-		Type = std::format("alignas(0x{:X}) uint8", Alignas);
-#endif
-	return MakeMemberString(Type, std::format("Pad_{:X}[0x{:X}]", Offset, PadSize), std::format("0x{:04X}(0x{:04X})({})", Offset, PadSize, std::move(Reason)));
+	return MakeMemberString("uint8", std::format("Pad_{:X}[0x{:X}]", Offset, PadSize), std::format("0x{:04X}(0x{:04X})({})", Offset, PadSize, std::move(Reason)));
 }
 
 std::string CppGenerator::GenerateBitPadding(uint8 UnderlayingSizeBytes, const uint8 PrevBitPropertyEndBit, const int32 Offset, const int32 PadSize, std::string&& Reason)
@@ -74,7 +62,7 @@ std::string CppGenerator::GenerateBitPadding(uint8 UnderlayingSizeBytes, const u
 	return MakeMemberString(GetTypeFromSize(UnderlayingSizeBytes), std::format("BitPad_{:X}_{:X} : {:d}", Offset, PrevBitPropertyEndBit, PadSize), std::format("0x{:04X}(0x{:04X})({})", Offset, UnderlayingSizeBytes, std::move(Reason)));
 }
 
-std::string CppGenerator::GenerateMembers(const StructWrapper& Struct, const MemberManager& Members, int32 SuperSize, int32 SuperLastMemberEnd, int32 SuperAlign, int32 PackageIndex)
+std::string CppGenerator::GenerateMembers(const StructWrapper& Struct, const MemberManager& Members, int32 SuperSize, int32 SuperLastMemberEnd, int32 PackageIndex)
 {
 	constexpr uint64 EstimatedCharactersPerLine = 0xF0;
 
@@ -143,26 +131,7 @@ std::string CppGenerator::GenerateMembers(const StructWrapper& Struct, const Mem
 
 		if (MemberOffset > PrevPropertyEnd && !bIsUnion)
 		{
-#ifndef _WIN32
-			// When the first derived member is padding, annotate it with
-			// alignas(alignof(Super)) so Itanium doesn't slot it into the base's
-			// tail padding. The current position must already be super-aligned
-			// (it always is, because the reflected super size is its aligned
-			// size); the padding's own size doesn't need to be super-aligned,
-			// because alignas only moves the *start* of the member, and the
-			// reflected offset of the next member accounts for whatever size we
-			// pick here. MSVC ignores the alignas (the offset would be
-			// super-aligned anyway because reflection reports aligned offsets).
-			const int32 LeadPadSize = MemberOffset - PrevPropertyEnd;
-			const bool bApplyLeadingAlignas =
-				!bEmittedAny
-				&& SuperAlign > 1
-				&& (PrevPropertyEnd % SuperAlign) == 0;
-			const int32 LeadAlignas = bApplyLeadingAlignas ? SuperAlign : 0;
-			OutMembers += GenerateBytePadding(PrevPropertyEnd, LeadPadSize, "Fixing Size After Last Property [ Dumper-7 ]", LeadAlignas);
-#else
 			OutMembers += GenerateBytePadding(PrevPropertyEnd, MemberOffset - PrevPropertyEnd, "Fixing Size After Last Property [ Dumper-7 ]");
-#endif
 			bEmittedAny = true;
 		}
 
@@ -697,11 +666,8 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 
 	const int32 StructSize = Struct.GetSize();
 	int32 SuperSize = 0x0;
-	int32 UnalignedSuperSize = 0x0;
-	int32 SuperAlignment = 0x0;
 	int32 SuperLastMemberEnd = 0x0;
 	int32 SuperEffectiveCppEnd = 0x0;
-	bool bIsReusingTrailingPaddingFromSuper = false;
 
 	StructWrapper Super = Struct.GetSuper();
 
@@ -712,12 +678,8 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 	{
 		UniqueSuperName = GetStructPrefixedName(Super);
 		SuperSize = Super.GetSize();
-		UnalignedSuperSize = Super.GetUnalignedSize();
-		SuperAlignment = Super.GetAlignment();
 		SuperLastMemberEnd = Super.GetLastMemberEnd();
 		SuperEffectiveCppEnd = Super.GetEffectiveCppEnd();
-
-		bIsReusingTrailingPaddingFromSuper = Super.HasReusedTrailingPadding();
 
 		if (Super.IsCyclicWithPackage(PackageIndex)) [[unlikely]]
 			UniqueSuperName = GetCycleFixupType(Super, true);
@@ -753,7 +715,6 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 		 */
 		constexpr int32 FStructBaseChainDataSize = sizeof(void*) + sizeof(int32);
 		SuperSize += FStructBaseChainDataSize;
-		UnalignedSuperSize += FStructBaseChainDataSize;
 		SuperLastMemberEnd = SuperSize;
 		SuperEffectiveCppEnd = SuperSize;
 	}
@@ -827,16 +788,7 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 
 	if (bHasMembers)
 	{
-		/* When reusing super's trailing padding, start own-member layout at
-		 * the super's effective C++ end — the first byte past everything the
-		 * super physically emits. SuperEffectiveCppEnd already walks past
-		 * pure pass-through layers whose UnalignedSize is a fiction (clamped
-		 * by derived's LowestOffset but backed by no emitted bytes). See
-		 * StructInfo::EffectiveCppEnd for the full rationale. */
-		const int32 MemberLayoutStart = bIsReusingTrailingPaddingFromSuper
-			? SuperEffectiveCppEnd
-			: SuperSize;
-		StructFile << GenerateMembers(Struct, Members, MemberLayoutStart, SuperLastMemberEnd, SuperAlignment, PackageIndex);
+		StructFile << GenerateMembers(Struct, Members, SuperEffectiveCppEnd, SuperLastMemberEnd, PackageIndex);
 
 		if (bHasFunctions)
 			StructFile << "\npublic:\n";
