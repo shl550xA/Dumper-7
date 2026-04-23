@@ -688,15 +688,18 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 	/*
 	 * UE >= 4.22 declares UStruct with multi-inheritance:
 	 *   class UStruct : public UField, private FStructBaseChain { ... };
-	 * Emit it the same way — MSVC reuses FStructBaseChain's 4-byte tail padding for
-	 * UStruct::Size at 0x3C unconditionally; clang's Itanium ABI reuses that pad too
-	 * via the empty user-provided destructor emitted on FStructBaseChain in
-	 * GenerateBasicFiles (which makes the base non-trivial-for-layout).
+	 * Emit it the same way. UStruct::Size lives at 0x3C, inside what would be
+	 * FStructBaseChain's 4-byte trailing pad; getting it there requires the
+	 * compiler to place own-members starting at FStructBaseChain's data size
+	 * (void* + int32 = 12 bytes) rather than its aligned size (16 bytes).
+	 * Clang's Itanium ABI does that only when the base is non-trivial-for-
+	 * layout — which we arrange by emitting a user-provided empty destructor
+	 * on FStructBaseChain in GenerateBasicFiles.
 	 *
-	 * Emitting FStructBaseChain as a member at 0x30 (the previous approach) was a
-	 * layout error on every conforming compiler: a member's trailing padding is part
-	 * of its sizeof and can never be reused by the next member, so UStruct::Size
-	 * could not actually live at 0x3C under that emission.
+	 * The previous emission (FStructBaseChain as a *member* at 0x30) couldn't
+	 * work on any conforming compiler: a member's trailing padding is part of
+	 * its sizeof and the next member is placed after it, so UStruct::Size
+	 * could not land at 0x3C that way.
 	 */
 	const bool bUStructNeedsBaseChainInheritance = Struct.IsUnrealStruct()
 		&& Struct.GetRawName() == "Struct"
@@ -769,9 +772,10 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
   , bHasValidSuper ? (" : public " + UniqueSuperName) : "");
 
 #ifndef _WIN32
-	// On Itanium ABI, a base whose tail padding is reused by a child must be
-	// non-trivial-for-layout; a user-provided empty destructor is sufficient.
-	// MSVC reuses tail padding unconditionally so doesn't need this.
+	// On Itanium ABI, a base whose tail padding is reused by a derived class
+	// must be non-trivial-for-layout; a user-provided empty destructor is
+	// sufficient. Only needed outside MSVC — on Windows this struct's layout
+	// already lands where UE's reflection expects without the dtor trick.
 	if (bHasReusedTrailingPadding)
 		StructFile << std::format("public:\n\t~{}() {{}}\n\n", UniqueName);
 #endif
@@ -4883,8 +4887,9 @@ public:
 	 * Empty user-provided destructor demotes FStructBaseChain from trivial to
 	 * non-trivial-for-layout, which lets clang's Itanium ABI reuse its 4-byte
 	 * trailing padding when it's inherited (by UStruct; see the multi-inheritance
-	 * branch in GenerateStruct). MSVC reuses base tail padding unconditionally, so
-	 * the dtor is a no-op there.
+	 * branch in GenerateStruct). The dtor is a no-op on MSVC — Windows arrives
+	 * at the correct UStruct::Size offset by different rules, so the presence
+	 * or absence of this dtor doesn't change that layout there.
 	 */
 	FStructBaseChain.Functions = {
 		PredefinedFunction{
