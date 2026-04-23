@@ -817,7 +817,18 @@ void CppGenerator::GenerateStruct(const StructWrapper& Struct, StreamType& Struc
 		if (bIsTemplatedType)
 			return;
 
-		const std::string AssertionMacroName = GetAssertionMacroString(UniqueName);
+		// Parameter-struct names are formed from just <ClassName>_<FuncName> and
+		// are not namespace-qualified in the emitted C++ (they live in Params::).
+		// That means two packages with same-named BP classes (common for
+		// BlueprintGeneratedClass — SequenceDirector_C, BP_Foo_C, …) produce
+		// identical assertion macro names, and the later #define in Assertions.inl
+		// silently shadows the earlier one. Qualify with the owning package to
+		// keep each macro unique.
+		std::string MacroIdentBase = UniqueName;
+		if (Struct.IsFunction() && Struct.IsUnrealStruct())
+			MacroIdentBase = PackageManager::GetName(Struct.GetUnrealStruct().GetPackageIndex()) + "__" + UniqueName;
+
+		const std::string AssertionMacroName = GetAssertionMacroString(MacroIdentBase);
 
 		// Place the macro below the struct so members etc. are verified
 		StructFile << AssertionMacroName << ";\n";
