@@ -9,6 +9,14 @@ produces a full C++ SDK that compiles on clang with
 `SDK_SKIP_STATIC_ASSERTS=OFF` (every generated `static_assert` on struct
 size / alignment / member offset passes).
 
+> ⚠️ **Windows may currently be broken.** The recent layout-engine work
+> (`EffectiveCppEnd`, `UStruct` emitted as `: private FStructBaseChain`,
+> the enum hex-literal switch, the `enum class X y` → `X y` predef
+> change, `PropertyFixup.hpp` switching to `uint8_t`) was done against
+> Clang/Itanium on Android and was **not** gated behind `#ifdef _WIN32`.
+> It has not been re-tested on Windows / MSVC since — the generator
+> output and the emitted SDK there may have regressed.
+
 ### Tested games (Android ARM64)
 
 | Package | UE | Dump | SDK compiles |

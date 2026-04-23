@@ -16,6 +16,8 @@ Three supported build systems. Always build **Release** for use; Debug only when
 
 There is no test suite. Validation is done by injecting the resulting DLL/SO into a game and inspecting the generated SDK / console output.
 
+> ⚠️ **Windows/MSVC path is currently untested.** The recent layout-engine changes (`StructInfo::EffectiveCppEnd`, `UStruct` emitted with `: private FStructBaseChain`, `GenerateEnum` switching to hex literals, the `enum class X y` → `X y` drop in predefs, `PropertyFixup.hpp` moving to `uint8_t`) were done against Clang/Itanium on Android and **not** gated behind `#ifdef _WIN32`. Dumper generation and generated-SDK compilation on Windows have not been re-verified since, and may have regressed. When editing the generator, prefer changes that don't diverge MSVC and Clang output; when divergence is unavoidable, gate it with `#ifdef _WIN32` the way `GenerateStruct` already does for `alignas` vs `SDK_ALIGN` and the Itanium empty-dtor emission.
+
 ### Android ARM64
 
 The `android-arm64-{debug,release,prod}` presets in [CMakePresets.json](CMakePresets.json) build `libDumper-7.so` for `arm64-v8a` against NDK API level 28. Requires `ANDROID_NDK_ROOT`, `ANDROID_NDK_VERSION`, `ANDROID_SDK_ROOT`, and `ANDROID_CMAKE_VERSION` in the environment.
